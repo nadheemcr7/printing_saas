@@ -34,7 +34,12 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
     );
 
     // Dynamic UPI Link for QR/Mobile Apps
-    const upiLink = `upi://pay?pa=${vpa}&pn=SolvePrint&am=${amount}&tr=${orderId}&cu=INR`;
+    const upiLink = `upi://pay?pa=${vpa}&pn=SolvePrint&am=${amount}&tr=${orderId}&cu=INR&tn=PrintOrder_${orderId.slice(0, 5)}`;
+
+    const handleCopyVpa = () => {
+        navigator.clipboard.writeText(vpa);
+        alert("UPI ID Copied!");
+    };
 
     const handleVerify = async (file: File) => {
         try {
@@ -52,7 +57,7 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
             const result = await analyzePaymentScreenshot(base64, amount);
 
             if (!result.isSuccessful || !result.isMatch) {
-                throw new Error("Payment could not be verified. Please ensure the screenshot clearly shows the amount and success status.");
+                throw new Error(`AI could not verify payment. Amount found: ₹${result.amount || 0}. Status: ${result.isSuccessful ? 'Success' : 'Failed'}. Please try again.`);
             }
 
             // 3. Update Order in DB
@@ -60,7 +65,7 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
                 .from('orders')
                 .update({
                     payment_status: 'paid',
-                    status: 'queued', // Move from pending_payment to queued
+                    status: 'queued',
                     utr_id: result.utr,
                     ai_verification_log: result
                 })
@@ -83,28 +88,46 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
                 <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
                     <CheckCircle2 size={48} />
                 </div>
-                <h3 className="text-2xl font-bold">Payment Verified!</h3>
-                <p className="text-slate-500">Your print job is now in the queue.</p>
+                <h3 className="font-display text-2xl font-bold">Payment Verified!</h3>
+                <p className="text-slate-500 font-medium">Your print job is now in the queue.</p>
             </div>
         );
     }
 
     return (
         <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-100 p-6 rounded-[32px] text-center space-y-4">
-                <div className="flex justify-center">
-                    {/* In a real app, we'd use qr-code-styling, but for demo we show the link */}
-                    <div className="w-48 h-48 bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center group relative">
-                        <QrCode size={120} className="text-slate-900 group-hover:scale-110 transition-transform" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Smartphone className="text-blue-600 animate-bounce" />
-                        </div>
-                    </div>
-                </div>
+            <div className="bg-blue-600 text-white p-8 rounded-[32px] text-center space-y-6 shadow-xl shadow-blue-200">
                 <div>
-                    <p className="text-3xl font-black text-slate-900 tracking-tight">₹{amount.toFixed(2)}</p>
-                    <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mt-1">Scan to pay via UPI</p>
+                    <p className="text-blue-100 text-xs font-bold uppercase tracking-widest mb-1">Total Amount</p>
+                    <p className="text-4xl font-black tracking-tight">₹{amount.toFixed(2)}</p>
                 </div>
+
+                {/* Mobile Pay Button */}
+                <div className="space-y-3">
+                    <a
+                        href={upiLink}
+                        className="w-full bg-white text-blue-600 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm"
+                    >
+                        <Smartphone size={20} />
+                        Pay via UPI App
+                    </a>
+
+                    <button
+                        onClick={handleCopyVpa}
+                        className="text-xs font-bold text-blue-100 hover:text-white flex items-center justify-center gap-1 mx-auto"
+                    >
+                        <Copy size={12} />
+                        Copy UPI ID: {vpa}
+                    </button>
+                </div>
+            </div>
+
+            {/* Desktop Fallback (QR) */}
+            <div className="flex flex-col items-center gap-4 py-4 md:hidden">
+                <div className="w-40 h-40 bg-slate-50 border border-slate-100 rounded-3xl flex items-center justify-center p-4">
+                    <QrCode size={100} className="text-slate-300" />
+                </div>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Payment QR Code</p>
             </div>
 
             <div className="space-y-4">

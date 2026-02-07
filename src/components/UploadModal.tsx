@@ -30,6 +30,7 @@ export function UploadModal({ isOpen, onClose, userId }: UploadModalProps) {
     const [analysis, setAnalysis] = useState<any>(null);
     const [order, setOrder] = useState<any>(null);
     const [vpa, setVpa] = useState<string>("nadheem@okicici"); // Default fallback
+    const [rate, setRate] = useState<number>(2.00); // Default fallback ₹2
     const [error, setError] = useState<string | null>(null);
 
     const supabase = createBrowserClient(
@@ -38,15 +39,26 @@ export function UploadModal({ isOpen, onClose, userId }: UploadModalProps) {
     );
 
     useEffect(() => {
-        supabase
-            .from("profiles")
-            .select("vpa")
-            .eq("role", "owner")
-            .limit(1)
-            .single()
-            .then(({ data }) => {
-                if (data?.vpa) setVpa(data.vpa);
-            });
+        // Fetch Owner's UPI VPA and Rates
+        const fetchSettings = async () => {
+            const { data: profileData } = await supabase
+                .from("profiles")
+                .select("vpa")
+                .eq("role", "owner")
+                .single();
+
+            if (profileData?.vpa) setVpa(profileData.vpa);
+
+            const { data: pricingData } = await supabase
+                .from("pricing_config")
+                .select("rate_per_page")
+                .limit(1)
+                .single();
+
+            if (pricingData?.rate_per_page) setRate(Number(pricingData.rate_per_page));
+        };
+
+        fetchSettings();
     }, [supabase]);
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -96,7 +108,7 @@ export function UploadModal({ isOpen, onClose, userId }: UploadModalProps) {
                     pickup_code: pickupCode,
                     status: 'pending_payment',
                     total_pages: result.pageCount,
-                    estimated_cost: result.pageCount * 2, // ₹2 per page
+                    estimated_cost: result.pageCount * rate, // Use fetched rate
                     payment_status: 'unpaid'
                 })
                 .select()
