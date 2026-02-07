@@ -34,13 +34,18 @@
     - [ ] Global order stats
 
 ## Phase 4: Core Workflow & Payments [ ]
-- [ ] **Smart Payment Flow**:
-    - [ ] Dynamic UPI QR Code generation
-    - [ ] **AI Screenshot Analysis** (OCR + Verification)
-    - [ ] Automated 'Paid' status transitions
+- [x] **Smart Payment Flow**:
+    - [x] Dynamic UPI QR Code / Intent generation [x]
+    - [x] **AI Screenshot Analysis** (OCR + Verification) [x]
+    - [x] Automated 'Paid' status transitions [x]
 - [x] Implement Gemini AI "File Inspector" (Page counting) [x]
-- [ ] Real-time UI updates (Supabase Realtime)
+- [x] Real-time UI updates (Supabase Realtime) [x]
 - [ ] 24-hour auto-cleanup script for old files
+
+---
+
+## 📜 Activity History
+- [x] [Daily Log: 2026-02-07](.agent/daily-logs/2026-02-07.md)
 
 ## Phase 5: Testing & Polishing [ ]
 - [ ] Test owner/customer real-time sync
