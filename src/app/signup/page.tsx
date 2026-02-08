@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Printer, Mail, Lock, User, Store, Loader2, CheckCircle2 } from "lucide-react";
+import { Printer, Mail, Lock, User, Loader2, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -67,34 +67,8 @@ export default function SignupPage() {
                 </div>
 
                 <form onSubmit={handleSignup} className="space-y-4">
-                    <div className="flex gap-4 mb-2">
-                        <button
-                            type="button"
-                            onClick={() => setRole("customer")}
-                            className={cn(
-                                "flex-1 p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all",
-                                role === "customer"
-                                    ? "border-blue-600 bg-blue-50 text-blue-600"
-                                    : "border-slate-100 bg-slate-50 text-slate-500 hover:border-slate-200"
-                            )}
-                        >
-                            <User size={24} />
-                            <div className="text-xs font-bold uppercase tracking-wider">Student</div>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setRole("owner")}
-                            className={cn(
-                                "flex-1 p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all",
-                                role === "owner"
-                                    ? "border-blue-600 bg-blue-50 text-blue-600"
-                                    : "border-slate-100 bg-slate-50 text-slate-500 hover:border-slate-200"
-                            )}
-                        >
-                            <Store size={24} />
-                            <div className="text-xs font-bold uppercase tracking-wider">Shop Owner</div>
-                        </button>
-                    </div>
+                    {/* Role Selection Hidden - Re-enable only for private admin use if needed */}
+                    <input type="hidden" value="customer" name="role" />
 
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-slate-700 block">Full Name</label>

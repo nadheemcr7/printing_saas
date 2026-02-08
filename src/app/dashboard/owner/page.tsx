@@ -40,20 +40,20 @@ export default function OwnerDashboard() {
         { label: "Ready", value: orders.filter(o => o.status === 'ready').length, icon: <CheckCircle2 className="text-emerald-500" /> },
     ];
 
+    const fetchOrders = async () => {
+        const { data } = await supabase
+            .from("orders")
+            .select(`
+      *,
+      profiles:customer_id (full_name)
+    `)
+            .order("created_at", { ascending: false });
+
+        setOrders(data || []);
+        setLoading(false);
+    };
+
     useEffect(() => {
-        const fetchOrders = async () => {
-            const { data } = await supabase
-                .from("orders")
-                .select(`
-          *,
-          profiles:customer_id (full_name)
-        `)
-                .order("created_at", { ascending: false });
-
-            setOrders(data || []);
-            setLoading(false);
-        };
-
         fetchOrders();
 
         // Realtime subscription
@@ -85,6 +85,8 @@ export default function OwnerDashboard() {
 
         if (!error) {
             setSelectedOrders([]);
+            // Fetch immediately for snapiness
+            await fetchOrders();
         }
     };
 
@@ -240,39 +242,110 @@ export default function OwnerDashboard() {
                                                 <StatusBadge status={order.status} />
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex items-center justify-end gap-2 opacity-100 group-hover:opacity-100 transition-opacity">
                                                     {order.status === 'pending_verification' && (
                                                         <>
                                                             <button
-                                                                onClick={async () => {
-                                                                    const { data } = await supabase.storage.from('screenshots').createSignedUrl(order.payment_screenshot, 60);
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!order.payment_screenshot) {
+                                                                        alert("No screenshot available for this order.");
+                                                                        return;
+                                                                    }
+                                                                    const { data, error } = await supabase.storage.from('screenshots').createSignedUrl(order.payment_screenshot, 60);
+                                                                    if (error) {
+                                                                        console.error("Screenshot Error:", error);
+                                                                        alert("Error opening screenshot: " + error.message);
+                                                                        return;
+                                                                    }
                                                                     if (data?.signedUrl) window.open(data.signedUrl);
                                                                 }}
                                                                 title="View Proof"
-                                                                className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
+                                                                className="p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-all border border-purple-100 bg-purple-50/50"
                                                             >
                                                                 <Eye size={18} />
                                                             </button>
                                                             <button
-                                                                onClick={async () => {
-                                                                    await supabase.from('orders').update({ payment_status: 'paid', status: 'queued' }).eq('id', order.id);
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    // Optimistic Update
+                                                                    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, payment_status: 'paid', status: 'queued' } : o));
+
+                                                                    const { error } = await supabase.from('orders')
+                                                                        .update({ payment_status: 'paid', status: 'queued' })
+                                                                        .eq('id', order.id);
+
+                                                                    if (error) {
+                                                                        alert("Failed to confirm payment: " + error.message);
+                                                                        fetchOrders(); // Rollback
+                                                                    }
                                                                 }}
                                                                 title="Confirm Payment"
-                                                                className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                                                className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all border border-emerald-100 bg-emerald-50/50"
                                                             >
                                                                 <CheckCircle2 size={18} />
                                                             </button>
                                                         </>
                                                     )}
+                                                    {order.status === 'queued' && (
+                                                        <button
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                // Optimistic Update
+                                                                setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'printing' } : o));
+
+                                                                const { error } = await supabase.from('orders').update({ status: 'printing' }).eq('id', order.id);
+                                                                if (error) {
+                                                                    alert("Update failed: " + error.message);
+                                                                    fetchOrders(); // Rollback
+                                                                }
+                                                            }}
+                                                            title="Start Printing"
+                                                            className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-all border border-blue-100 bg-blue-50/50"
+                                                        >
+                                                            <motion.div animate={{ opacity: [1, 0.5, 1] }} transition={{ repeat: Infinity, duration: 2 }}>
+                                                                <Printer size={18} />
+                                                            </motion.div>
+                                                        </button>
+                                                    )}
+                                                    {order.status === 'printing' && (
+                                                        <button
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                // Optimistic Update
+                                                                setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'ready' } : o));
+
+                                                                const { error } = await supabase.from('orders').update({ status: 'ready' }).eq('id', order.id);
+                                                                if (error) {
+                                                                    alert("Update failed: " + error.message);
+                                                                    fetchOrders(); // Rollback
+                                                                }
+                                                            }}
+                                                            title="Mark Ready"
+                                                            className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all border border-emerald-100 bg-emerald-50/50"
+                                                        >
+                                                            <CheckCircle2 size={18} />
+                                                        </button>
+                                                    )}
                                                     <button
-                                                        onClick={async () => {
-                                                            const { data } = await supabase.storage.from('documents').createSignedUrl(order.file_path, 60);
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            if (!order.file_path) {
+                                                                alert("No document file linked to this order.");
+                                                                return;
+                                                            }
+                                                            const { data, error } = await supabase.storage.from('documents').createSignedUrl(order.file_path, 60);
+                                                            if (error) {
+                                                                console.error("Document Error:", error);
+                                                                alert("Error opening document: " + error.message);
+                                                                return;
+                                                            }
                                                             if (data?.signedUrl) window.open(data.signedUrl);
                                                         }}
                                                         title="Download Document"
-                                                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-all border border-blue-100 bg-blue-50/50"
                                                     >
-                                                        <Printer size={18} />
+                                                        <Download size={18} />
                                                     </button>
                                                 </div>
                                             </td>

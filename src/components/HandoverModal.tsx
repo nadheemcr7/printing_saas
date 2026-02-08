@@ -42,8 +42,10 @@ export function HandoverModal({ isOpen, onClose }: HandoverModalProps) {
 
             if (error) throw error;
 
-            const result = data[0];
-            if (result.success) {
+            // Handle both array and single object based on PostgREST version
+            const result = Array.isArray(data) ? data[0] : data;
+
+            if (result && result.success) {
                 setStatus('success');
                 setTimeout(() => {
                     handleClose();
