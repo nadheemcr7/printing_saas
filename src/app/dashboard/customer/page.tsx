@@ -25,6 +25,8 @@ export default function CustomerDashboard() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
     const [shopSettings, setShopSettings] = useState({ shop_name: "RIDHA PRINTERS", is_open: true });
+    const [showAllOrders, setShowAllOrders] = useState(false);
+    const [activeTab, setActiveTab] = useState<'prints' | 'docs'>('prints');
 
     useEffect(() => {
         if (!user) return;
@@ -40,36 +42,75 @@ export default function CustomerDashboard() {
         };
 
         const fetchShopSettings = async () => {
-            const { data } = await supabase
-                .from("shop_settings")
-                .select("shop_name, is_open")
-                .limit(1);
+            try {
+                const { data, error } = await supabase
+                    .from("shop_settings")
+                    .select("*")
+                    .limit(1)
+                    .single();
 
-            if (data && data[0]) setShopSettings(data[0]);
+                if (error) throw error;
+                if (data) setShopSettings(data);
+            } catch (err) {
+                console.error("Failed to fetch shop settings:", err);
+            }
         };
 
+        // Initial fetch
         fetchMyOrders();
         fetchShopSettings();
 
+        // === LAYER 1: Supabase Realtime - User-scoped channel ===
         const orderChannel = supabase
-            .channel("user_orders")
-            .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `customer_id=eq.${user.id}` }, () => {
-                fetchMyOrders();
+            .channel(`customer_orders_${user.id}`)
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
+                if (payload.new.customer_id === user.id) {
+                    setOrders(prev => [payload.new as any, ...prev]);
+                }
+            })
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload) => {
+                if (payload.new.customer_id === user.id) {
+                    setOrders(prev => prev.map(o =>
+                        o.id === payload.new.id ? { ...o, ...payload.new } : o
+                    ));
+                }
+            })
+            .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, (payload) => {
+                if (payload.old.customer_id === user.id) {
+                    setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+                }
             })
             .subscribe();
 
         const settingsChannel = supabase
-            .channel("shop_settings")
+            .channel(`shop_settings_${user.id}`)
             .on("postgres_changes", { event: "UPDATE", schema: "public", table: "shop_settings" }, (payload) => {
-                setShopSettings(payload.new as any);
+                setShopSettings(prev => ({ ...prev, ...payload.new }));
             })
             .subscribe();
+
+        // === LAYER 2: Visibility Change (refetch only when tab becomes active after being hidden) ===
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                fetchMyOrders();
+                fetchShopSettings();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
             supabase.removeChannel(orderChannel);
             supabase.removeChannel(settingsChannel);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [supabase, user]);
+
+    // Compute which orders to display based on active tab and showAll state
+    const ordersToDisplay = activeTab === 'docs'
+        ? orders // Show all documents in Docs tab
+        : showAllOrders
+            ? orders // Show all in history mode
+            : orders.filter(o => o.status !== 'completed').slice(0, 5); // Show recent active orders
 
     return (
         <div className="min-h-screen bg-white font-sans">
@@ -91,8 +132,16 @@ export default function CustomerDashboard() {
                         <Printer size={18} />
                     </div>
                     <span className="font-bold text-lg">{shopSettings.shop_name}</span>
-                    {!shopSettings.is_open && (
-                        <span className="bg-red-100 text-red-600 text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">Closed</span>
+                    {shopSettings.is_open ? (
+                        <span className="bg-emerald-100 text-emerald-600 text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter flex items-center gap-1">
+                            <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse" />
+                            Open
+                        </span>
+                    ) : (
+                        <span className="bg-red-100 text-red-600 text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter flex items-center gap-1">
+                            <div className="w-1 h-1 bg-red-500 rounded-full" />
+                            Closed
+                        </span>
                     )}
                 </div>
                 <button
@@ -149,17 +198,26 @@ export default function CustomerDashboard() {
                 {/* My Orders Section */}
                 <div className="space-y-6">
                     <div className="flex items-center justify-between">
-                        <h3 className="text-xl font-bold font-display">Recent Prints</h3>
-                        <button className="text-sm font-bold text-blue-600 hover:underline">View All</button>
+                        <h3 className="text-xl font-bold font-display">
+                            {activeTab === 'docs' ? 'All Documents' : (showAllOrders ? 'Order History' : 'Recent Prints')}
+                        </h3>
+                        {activeTab === 'prints' && (
+                            <button
+                                onClick={() => setShowAllOrders(!showAllOrders)}
+                                className="text-sm font-bold text-blue-600 hover:underline"
+                            >
+                                {showAllOrders ? 'Show Recent' : 'View All'}
+                            </button>
+                        )}
                     </div>
 
-                    <div className="space-y-4">
-                        {orders.length === 0 ? (
+                    <div className="space-y-2">
+                        {ordersToDisplay.length === 0 ? (
                             <div className="text-center py-10 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
                                 <FileText className="mx-auto text-slate-300 mb-2" size={32} />
                                 <p className="text-sm text-slate-500 font-bold">No print jobs yet.</p>
                             </div>
-                        ) : orders.map((order) => (
+                        ) : ordersToDisplay.map((order) => (
                             <motion.div
                                 key={order.id}
                                 initial={{ opacity: 0, scale: 0.95 }}
@@ -184,10 +242,15 @@ export default function CustomerDashboard() {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
                                         <span className="font-bold text-slate-900 truncate">Document_{order.pickup_code}.pdf</span>
+                                        {order.page_range && order.page_range !== 'All' && (
+                                            <span className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-md font-bold border border-purple-100 uppercase tracking-tighter">
+                                                PGS: {order.page_range}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <StatusBadge status={order.status} />
-                                        <span className="text-[10px] text-slate-400 font-bold">• {order.total_pages} Pages</span>
+                                        <span className="text-[10px] text-slate-400 font-bold">• {new Date(order.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })} at {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </div>
                                 </div>
                                 <ChevronRight size={20} className="text-slate-300" />
@@ -200,7 +263,12 @@ export default function CustomerDashboard() {
             {/* Dock Area Navigation */}
             <div className="fixed bottom-0 w-full px-6 pb-6 pointer-events-none">
                 <div className="max-w-md mx-auto h-16 bg-white/90 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-2xl pointer-events-auto flex items-center justify-around px-4">
-                    <DockItem icon={<Printer size={20} />} label="Prints" active />
+                    <DockItem
+                        icon={<Printer size={20} />}
+                        label="Prints"
+                        active={activeTab === 'prints'}
+                        onClick={() => { setActiveTab('prints'); setShowAllOrders(false); }}
+                    />
                     <DockItem
                         icon={<Plus size={20} />}
                         label="Add"
@@ -209,7 +277,8 @@ export default function CustomerDashboard() {
                     <DockItem
                         icon={<FileText size={20} />}
                         label="Docs"
-                        onClick={() => { }} // Could link to a documents page later
+                        active={activeTab === 'docs'}
+                        onClick={() => setActiveTab('docs')}
                     />
                 </div>
             </div>

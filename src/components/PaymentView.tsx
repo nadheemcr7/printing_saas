@@ -9,9 +9,10 @@ import {
     Smartphone,
     AlertCircle,
     Hourglass,
-    ShieldCheck
+    ShieldCheck,
+    CreditCard
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { cn, compressImage } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
@@ -21,23 +22,129 @@ interface PaymentViewProps {
     amount: number;
     vpa: string;
     onSuccess: () => void;
+    customerName?: string;
+    customerEmail?: string;
 }
 
-export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProps) {
-    const [status, setStatus] = useState<'pay' | 'verifying' | 'success' | 'error'>('pay');
+declare global {
+    interface Window {
+        Razorpay: any;
+    }
+}
+
+export function PaymentView({ orderId, amount, vpa, onSuccess, customerName, customerEmail }: PaymentViewProps) {
+    const [status, setStatus] = useState<'pay' | 'processing' | 'verifying' | 'success' | 'error'>('pay');
     const [error, setError] = useState<string | null>(null);
+    const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'manual'>('razorpay');
 
     const isVpaValid = vpa && vpa !== "shop@upi" && vpa !== "";
+    const razorpayKeyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
     const supabase = createBrowserClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
 
-    // Dynamic UPI Link for QR/Mobile Apps
+    // Load Razorpay script
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        document.body.appendChild(script);
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, []);
+
+    // Dynamic UPI Link for QR/Mobile Apps (manual mode)
     const upiLink = isVpaValid
         ? `upi://pay?pa=${vpa}&pn=SolvePrint&am=${amount}&tr=${orderId}&cu=INR&tn=Order_${orderId.slice(0, 5)}`
         : null;
+
+    const handleRazorpayPayment = async () => {
+        setError(null);
+        setStatus('processing');
+
+        try {
+            // 1. Create Razorpay order
+            const response = await fetch('/api/payments/create-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    amount,
+                    orderId,
+                    customerName: customerName || 'Guest',
+                    customerEmail: customerEmail || '',
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to create payment order');
+            }
+
+            // 2. Open Razorpay checkout
+            const options = {
+                key: razorpayKeyId,
+                amount: data.order.amount,
+                currency: data.order.currency,
+                name: 'Ridha Printers',
+                description: `Print Order #${orderId.slice(0, 8)}`,
+                order_id: data.order.id,
+                prefill: {
+                    name: customerName || '',
+                    email: customerEmail || '',
+                },
+                theme: {
+                    color: '#2563eb',
+                },
+                modal: {
+                    ondismiss: () => {
+                        setStatus('pay');
+                    },
+                },
+                handler: async function (response: any) {
+                    setStatus('verifying');
+
+                    // 3. Verify payment on backend
+                    try {
+                        const verifyResponse = await fetch('/api/payments/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                order_id: orderId,
+                            }),
+                        });
+
+                        const verifyData = await verifyResponse.json();
+
+                        if (verifyData.success) {
+                            setStatus('success');
+                            setTimeout(onSuccess, 2000);
+                        } else {
+                            throw new Error(verifyData.error || 'Payment verification failed');
+                        }
+                    } catch (err: any) {
+                        setError(err.message);
+                        setStatus('error');
+                    }
+                },
+            };
+
+            const razorpay = new window.Razorpay(options);
+            razorpay.open();
+            setStatus('pay');
+
+        } catch (err: any) {
+            console.error('Razorpay error:', err);
+            setError(err.message || 'Payment initialization failed');
+            setStatus('pay');
+        }
+    };
 
     const handleCopyVpa = () => {
         if (!isVpaValid) {
@@ -53,13 +160,11 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
         try {
             setStatus('verifying');
 
-            // 1. Compress Image (Reduces 5MB -> ~200KB)
             const compressedBlob = await compressImage(file, 0.6);
             const fileName = `${orderId}_${Date.now()}.jpg`;
 
-            // 2. Upload to Storage
             const { error: uploadError } = await supabase.storage
-                .from('screenshots')
+                .from('payments')
                 .upload(fileName, compressedBlob, {
                     contentType: 'image/jpeg',
                     cacheControl: '3600',
@@ -68,7 +173,6 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
 
             if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-            // 3. Update Order Status
             const { error: updateError } = await supabase
                 .from('orders')
                 .update({
@@ -94,23 +198,25 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
         return (
             <div className="flex flex-col items-center justify-center py-10 text-center space-y-4">
                 <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
-                    <Hourglass className="animate-pulse" size={48} />
+                    <CheckCircle2 size={48} />
                 </div>
-                <h3 className="font-display text-2xl font-bold text-slate-900">Screenshot Uploaded!</h3>
+                <h3 className="font-display text-2xl font-bold text-slate-900">Payment Successful!</h3>
                 <p className="text-slate-500 font-medium px-6">
-                    Waiting for Shop Owner to verify. Your document will join the queue once confirmed.
+                    Your document is now in the print queue. You'll be notified when it's ready!
                 </p>
             </div>
         );
     }
 
-    if (status === 'verifying') {
+    if (status === 'processing' || status === 'verifying') {
         return (
             <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
                 <Loader2 className="animate-spin text-blue-600" size={48} />
-                <h3 className="font-display text-xl font-bold text-slate-900">Uploading Payment Proof...</h3>
+                <h3 className="font-display text-xl font-bold text-slate-900">
+                    {status === 'processing' ? 'Initializing Payment...' : 'Verifying Payment...'}
+                </h3>
                 <p className="text-slate-500 font-medium px-6">
-                    Please wait while we process your screenshot.
+                    Please wait, do not close this window.
                 </p>
             </div>
         );
@@ -118,86 +224,122 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
 
     return (
         <div className="space-y-6">
-            <div className={cn(
-                "p-8 rounded-[32px] text-center space-y-6 shadow-xl transition-all",
-                isVpaValid ? "bg-blue-600 text-white shadow-blue-200" : "bg-slate-100 text-slate-400 shadow-none border border-slate-200"
-            )}>
-                <div>
-                    <p className={cn("text-xs font-bold uppercase tracking-widest mb-1", isVpaValid ? "text-blue-100" : "text-slate-400")}>Total Amount</p>
-                    <p className={cn("text-4xl font-black tracking-tight", isVpaValid ? "text-white" : "text-slate-300")}>₹{amount.toFixed(2)}</p>
-                </div>
-
-                <div className="space-y-3">
-                    {isVpaValid ? (
-                        <>
-                            <a
-                                href={upiLink || "#"}
-                                className="w-full bg-white text-blue-600 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm"
-                            >
-                                <Smartphone size={20} />
-                                Pay via UPI App
-                            </a>
-
-                            <button
-                                onClick={handleCopyVpa}
-                                className="text-xs font-bold text-blue-100 hover:text-white flex items-center justify-center gap-1 mx-auto"
-                            >
-                                <Copy size={12} />
-                                Copy VPA: {vpa}
-                            </button>
-                        </>
-                    ) : (
-                        <div className="py-4 space-y-2">
-                            <AlertCircle className="mx-auto text-slate-300" size={32} />
-                            <p className="text-sm font-bold text-slate-400 italic">Payments not set up by Shop Owner</p>
-                        </div>
-                    )}
-                </div>
+            {/* Amount Display */}
+            <div className="bg-blue-600 text-white p-8 rounded-[32px] text-center shadow-xl shadow-blue-200">
+                <p className="text-xs font-bold uppercase tracking-widest mb-1 text-blue-100">Total Amount</p>
+                <p className="text-4xl font-black tracking-tight">₹{amount.toFixed(2)}</p>
             </div>
 
-            {isVpaValid && (
-                <div className="flex flex-col items-center gap-4 py-4">
-                    <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
-                        <QRCodeSVG value={upiLink || ""} size={160} level="H" />
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
-                        Scan with GPay, PhonePe, or Paytm
+            {/* Payment Method Toggle */}
+            <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl">
+                <button
+                    onClick={() => setPaymentMethod('razorpay')}
+                    className={cn(
+                        "flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2",
+                        paymentMethod === 'razorpay'
+                            ? "bg-white text-blue-600 shadow-sm"
+                            : "text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    <CreditCard size={16} />
+                    Pay Now (Auto)
+                </button>
+                <button
+                    onClick={() => setPaymentMethod('manual')}
+                    className={cn(
+                        "flex-1 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2",
+                        paymentMethod === 'manual'
+                            ? "bg-white text-blue-600 shadow-sm"
+                            : "text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    <ShieldCheck size={16} />
+                    Manual Upload
+                </button>
+            </div>
+
+            {paymentMethod === 'razorpay' ? (
+                /* Razorpay Payment */
+                <div className="space-y-4">
+                    <button
+                        onClick={handleRazorpayPayment}
+                        disabled={status === 'processing'}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm disabled:opacity-50"
+                    >
+                        <Smartphone size={20} />
+                        Pay ₹{amount.toFixed(2)} via UPI
+                    </button>
+                    <p className="text-[10px] text-slate-400 font-medium text-center">
+                        Pay securely with GPay, PhonePe, Paytm, or any UPI app. <br />
+                        Auto-verified – no screenshot needed!
                     </p>
+                </div>
+            ) : (
+                /* Manual Payment */
+                <div className="space-y-4">
+                    {isVpaValid && (
+                        <>
+                            <div className="flex flex-col items-center gap-4 py-4">
+                                <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
+                                    <QRCodeSVG value={upiLink || ""} size={160} level="H" />
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
+                                    Scan with GPay, PhonePe, or Paytm
+                                </p>
+                            </div>
+
+                            <div className="space-y-3">
+                                <a
+                                    href={upiLink || "#"}
+                                    className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm"
+                                >
+                                    <Smartphone size={20} />
+                                    Pay via UPI App
+                                </a>
+
+                                <button
+                                    onClick={handleCopyVpa}
+                                    className="text-xs font-bold text-slate-500 hover:text-blue-600 flex items-center justify-center gap-1 mx-auto"
+                                >
+                                    <Copy size={12} />
+                                    Copy VPA: {vpa}
+                                </button>
+                            </div>
+                        </>
+                    )}
+
+                    <div className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                        <ShieldCheck className="text-blue-600" size={24} />
+                        <div className="flex-1 text-left">
+                            <p className="text-sm font-bold">Manual Verification</p>
+                            <p className="text-[10px] text-slate-500 font-medium leading-tight">Pay, take a screenshot, and upload it below for approval.</p>
+                        </div>
+                    </div>
+
+                    <div className="relative">
+                        <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            id="payment-upload"
+                            onChange={(e) => e.target.files?.[0] && handleScreenshotUpload(e.target.files[0])}
+                        />
+                        <label
+                            htmlFor="payment-upload"
+                            className="w-full p-4 rounded-2xl border-2 border-dashed flex items-center justify-center gap-2 cursor-pointer transition-all bg-white border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300 font-bold text-sm shadow-sm"
+                        >
+                            <ImageIcon size={20} />
+                            Upload Payment Screenshot
+                        </label>
+                    </div>
                 </div>
             )}
 
-            <div className="space-y-4">
-                <div className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
-                    <ShieldCheck className="text-blue-600" size={24} />
-                    <div className="flex-1 text-left">
-                        <p className="text-sm font-bold">Manual Verification</p>
-                        <p className="text-[10px] text-slate-500 font-medium leading-tight">Pay, take a screenshot, and upload it below for approval.</p>
-                    </div>
-                </div>
-
-                <div className="relative">
-                    <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        id="payment-upload"
-                        onChange={(e) => e.target.files?.[0] && handleScreenshotUpload(e.target.files[0])}
-                    />
-                    <label
-                        htmlFor="payment-upload"
-                        className="w-full p-4 rounded-2xl border-2 border-dashed flex items-center justify-center gap-2 cursor-pointer transition-all bg-white border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300 font-bold text-sm shadow-sm"
-                    >
-                        <ImageIcon size={20} />
-                        Upload Payment Screenshot
-                    </label>
-                </div>
-
-                {error && (
-                    <p className="text-xs text-red-500 font-bold text-center bg-red-50 p-3 rounded-xl border border-red-100 italic">
-                        "{error}"
-                    </p>
-                )}
-            </div>
+            {error && (
+                <p className="text-xs text-red-500 font-bold text-center bg-red-50 p-3 rounded-xl border border-red-100 italic">
+                    "{error}"
+                </p>
+            )}
         </div>
     );
 }

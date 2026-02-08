@@ -14,17 +14,18 @@ import {
     ArrowRight
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
-import { cn, generatePickupCode, calculatePrintCost, getPdfPageCount, formatCurrency } from "@/lib/utils";
+import { cn, generatePickupCode, calculatePrintCost, getDocumentPageCount, formatCurrency, parsePageRange } from "@/lib/utils";
 import { PaymentView } from "./PaymentView";
 
 interface UploadModalProps {
     isOpen: boolean;
     onClose: () => void;
     userId: string;
+    profile?: any;
     resumeOrder?: any;
 }
 
-export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: UploadModalProps) {
     const [file, setFile] = useState<File | null>(null);
     const [status, setStatus] = useState<'idle' | 'analyzing' | 'uploading' | 'payment' | 'success' | 'error'>('idle');
     const [analysis, setAnalysis] = useState<any>(null);
@@ -35,6 +36,8 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
     const [sideType, setSideType] = useState<'SINGLE' | 'DOUBLE'>('SINGLE');
     const [error, setError] = useState<string | null>(null);
     const [localPages, setLocalPages] = useState<number>(0);
+    const [pageRange, setPageRange] = useState<string>("All");
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
     const supabase = createBrowserClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -42,22 +45,23 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
     );
 
     useEffect(() => {
+        // Only fetch and subscribe when modal is open
+        if (!isOpen) return;
+
         // Fetch Owner's UPI VPA and Rates
         const fetchSettings = async () => {
-            // 1. Try fetching from shop_settings first (Official Source)
             const { data: shopData } = await supabase
                 .from("shop_settings")
-                .select("primary_vpa, backup_vpa, active_vpa_type")
-                .limit(1);
+                .select("*")
+                .limit(1)
+                .single();
 
-            if (shopData && shopData[0]) {
-                const s = shopData[0];
+            if (shopData) {
+                const s = shopData;
                 const activeVpa = s.active_vpa_type === 'primary' ? s.primary_vpa : s.backup_vpa;
-                if (activeVpa) {
-                    setVpa(activeVpa);
-                }
+                if (activeVpa) setVpa(activeVpa);
             } else {
-                // 2. Fallback to any owner's VPA from profiles
+                // Fallback to any owner's VPA from profiles
                 const { data: profileData } = await supabase
                     .from("profiles")
                     .select("vpa")
@@ -76,7 +80,21 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
         };
 
         fetchSettings();
-    }, [supabase]);
+
+        // Realtime sync for shop info (only when modal is open)
+        const channel = supabase
+            .channel("modal_settings_sync")
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "shop_settings" }, (payload) => {
+                const s = payload.new as any;
+                const activeVpa = s.active_vpa_type === 'primary' ? s.primary_vpa : s.backup_vpa;
+                if (activeVpa) setVpa(activeVpa);
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [supabase, isOpen]);
 
     useEffect(() => {
         if (isOpen && resumeOrder) {
@@ -93,14 +111,33 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
             setError(null);
 
             // Early local scan for instant feedback
-            const pages = await getPdfPageCount(selectedFile);
+            const pages = await getDocumentPageCount(selectedFile);
             setLocalPages(pages);
+
+            // Create preview URL
+            const url = URL.createObjectURL(selectedFile);
+            setPreviewUrl(url);
         }
     }, []);
 
+    const activePageCount = parsePageRange(pageRange, localPages);
+    const estimatedCost = calculatePrintCost(activePageCount, printType, sideType);
+
+    // Cleanup preview URL
+    useEffect(() => {
+        return () => {
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+        };
+    }, [previewUrl]);
+
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'application/pdf': ['.pdf'] },
+        accept: {
+            'application/pdf': ['.pdf'],
+            'application/msword': ['.doc'],
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
+        },
+        maxSize: 25 * 1024 * 1024,
         multiple: false
     });
 
@@ -112,11 +149,14 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
             console.log("Step 1: Analyzing PDF...");
 
             // 1. LOCAL SCAN
-            const localPageCount = await getPdfPageCount(file);
+            const localPageCount = await getDocumentPageCount(file);
             console.log("Step 1 Success: Pages =", localPageCount);
 
+            // Parse range count
+            const finalPageCount = parsePageRange(pageRange, localPageCount);
+
             // Calculate cost
-            const totalCost = calculatePrintCost(localPageCount, printType, sideType);
+            const totalCost = calculatePrintCost(finalPageCount, printType, sideType);
             console.log("Step 2: Calculated Cost =", totalCost);
 
             setStatus('uploading');
@@ -144,12 +184,13 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                     customer_id: userId,
                     pickup_code: pickupCode,
                     status: 'pending_payment',
-                    total_pages: localPageCount,
+                    total_pages: finalPageCount,
                     estimated_cost: totalCost,
                     payment_status: 'unpaid',
                     file_path: filePath,
                     print_type: printType,
-                    side_type: sideType
+                    side_type: sideType,
+                    page_range: pageRange
                 })
                 .select()
                 .single();
@@ -175,11 +216,14 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
     };
 
     const reset = () => {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
         setFile(null);
         setAnalysis(null);
         setOrder(null);
         setStatus('idle');
         setError(null);
+        setPageRange("All");
     };
 
     return (
@@ -225,8 +269,8 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                                             <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
                                                 <Upload className="text-blue-600" size={32} />
                                             </div>
-                                            <p className="font-bold text-slate-900">Tap to upload PDF</p>
-                                            <p className="text-sm text-slate-500 mt-1">Maximum file size 10MB</p>
+                                            <p className="font-bold text-slate-900">Tap to upload PDF or Word document</p>
+                                            <p className="text-sm text-slate-500 mt-1">Maximum file size: 25MB</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-4">
@@ -239,17 +283,39 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-xs text-slate-500 font-medium">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                                                         <span className="text-slate-300">•</span>
-                                                        <p className="text-xs text-blue-600 font-bold">{localPages} Pages</p>
+                                                        <p className="text-xs text-blue-600 font-bold">{activePageCount} of {localPages} Pages</p>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <p className="text-sm font-black text-slate-900">{formatCurrency(calculatePrintCost(localPages, printType, sideType))}</p>
+                                                    <p className="text-sm font-black text-slate-900">{formatCurrency(estimatedCost)}</p>
                                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Est. Cost</p>
                                                 </div>
-                                                <button onClick={() => setFile(null)} className="text-slate-400 hover:text-red-500">
+                                                <button onClick={() => { setFile(null); setPreviewUrl(null); }} className="text-slate-400 hover:text-red-500">
                                                     <X size={20} />
                                                 </button>
                                             </div>
+
+                                            {/* PDF Preview Area */}
+                                            {previewUrl && (
+                                                <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden h-40 relative group">
+                                                    {file.name.toLowerCase().endsWith('.pdf') ? (
+                                                        <iframe
+                                                            src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                                                            className="w-full h-full border-none"
+                                                            title="PDF Preview"
+                                                        />
+                                                    ) : (
+                                                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                                            <FileText size={48} className="mb-2" />
+                                                            <p className="text-sm font-bold">Word Preview Not Available</p>
+                                                            <p className="text-[10px]">Document will be printed as uploaded.</p>
+                                                        </div>
+                                                    )}
+                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 to-transparent flex items-end p-4">
+                                                        <span className="text-[10px] font-bold text-white uppercase tracking-widest bg-slate-900/40 backdrop-blur-md px-2 py-1 rounded">Quick Preview</span>
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {/* Selection UI */}
                                             <div className="grid grid-cols-2 gap-3">
@@ -278,6 +344,23 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                                                             className={cn("flex-1 py-2 rounded-xl text-xs font-bold transition-all", sideType === 'DOUBLE' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
                                                         >Double</button>
                                                     </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Page Range Input */}
+                                            <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-[10px] font-black uppercase text-blue-600 tracking-widest">Select Pages to Print</label>
+                                                    <span className="text-[10px] font-bold text-blue-400">Example: 1-5 or 1,3,7</span>
+                                                </div>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        value={pageRange}
+                                                        onChange={(e) => setPageRange(e.target.value)}
+                                                        placeholder="Enter pages (e.g. 5-10) or 'All'"
+                                                        className="w-full bg-white border border-blue-100 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-300"
+                                                    />
                                                 </div>
                                             </div>
                                         </div>
@@ -326,6 +409,7 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                                     orderId={order.id}
                                     amount={order.estimated_cost}
                                     vpa={vpa}
+                                    customerName={profile?.full_name || 'Guest'}
                                     onSuccess={() => {
                                         setStatus('success');
                                         setTimeout(() => { onClose(); reset(); }, 2000);

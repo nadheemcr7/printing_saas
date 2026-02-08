@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { PDFDocument } from "pdf-lib";
+import JSZip from "jszip";
 
 /**
  * Merges tailwind classes safely.
@@ -46,8 +47,57 @@ export function calculatePrintCost(pages: number, printType: 'BW' | 'COLOR', sid
 }
 
 /**
+ * Parses a page range string (e.g., "1-3, 5, 10-12") and returns the total count of pages.
+ */
+export function parsePageRange(range: string, totalPages: number): number {
+  if (!range || range.toLowerCase() === 'all') return totalPages;
+
+  const segments = range.split(',');
+  const selectedPages = new Set<number>();
+
+  segments.forEach(segment => {
+    const part = segment.trim();
+    if (part.includes('-')) {
+      const [start, end] = part.split('-').map(s => parseInt(s.trim()));
+      if (!isNaN(start) && !isNaN(end)) {
+        const s = Math.max(1, Math.min(start, end));
+        const e = Math.min(totalPages, Math.max(start, end));
+        for (let i = s; i <= e; i++) {
+          selectedPages.add(i);
+        }
+      }
+    } else {
+      const page = parseInt(part);
+      if (!isNaN(page) && page >= 1 && page <= totalPages) {
+        selectedPages.add(page);
+      }
+    }
+  });
+
+  return selectedPages.size > 0 ? selectedPages.size : totalPages;
+}
+
+/**
+ * Detects page count for PDF or Word (.docx)
+ */
+export async function getDocumentPageCount(file: File): Promise<number> {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+
+  if (extension === 'pdf') {
+    return getPdfPageCount(file);
+  } else if (extension === 'docx') {
+    return getDocxPageCount(file);
+  } else if (extension === 'doc') {
+    // Legacy .doc is binary and hard to parse client-side accurately
+    // Most users use .docx now, but we return 1 as fallback
+    return 1;
+  }
+
+  return 1;
+}
+
+/**
  * Reads a PDF file locally and returns the page count.
- * This is 100% reliable, instant, and works offline.
  */
 export async function getPdfPageCount(file: File): Promise<number> {
   try {
@@ -56,10 +106,31 @@ export async function getPdfPageCount(file: File): Promise<number> {
     return pdfDoc.getPageCount();
   } catch (error) {
     console.error("Error counting PDF pages:", error);
-    // Fallback search for /Type /Page if pdf-lib fails (happens with some corrupted PDFs)
     const text = await file.text();
     const matches = text.match(/\/Type\s*\/Page\b/g);
     return matches ? matches.length : 1;
+  }
+}
+
+/**
+ * Reads a .docx file and extracts page count from app.xml
+ */
+export async function getDocxPageCount(file: File): Promise<number> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const appXml = await zip.file("docProps/app.xml")?.async("text");
+
+    if (appXml) {
+      const match = appXml.match(/<Pages>(\d+)<\/Pages>/);
+      if (match && match[1]) {
+        return parseInt(match[1]);
+      }
+    }
+    return 1;
+  } catch (error) {
+    console.error("Error counting Word pages:", error);
+    return 1;
   }
 }
 /**

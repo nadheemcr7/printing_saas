@@ -41,12 +41,12 @@
 - [x] ~~Gemini AI "File Inspector"~~ → **Local PDF Page Counting** (pdf-lib) [x]
 - [x] Real-time UI updates (Supabase Realtime) [x]
 - [x] **Order Handover Verification** (3-digit code system) [x]
-- [ ] 24-hour auto-cleanup script for old files (Future optimization)
+- [x] **24-hour auto-cleanup script** for old files (Completed via SQL Cron/Triggers) [x]
 
 ---
 
 ## 📜 Activity History
-- [x] [Daily Log: 2026-02-08](.agent/daily-logs/2026-02-08.md) - **AI Removal & Manual Verification**
+- [x] [Daily Log: 2026-02-08](.agent/daily-logs/2026-02-08.md) - **Dashboard V2, Automation & Cohesion**
 - [x] [Daily Log: 2026-02-07](.agent/daily-logs/2026-02-07.md)
 
 ## Phase 5: Testing & Polishing [x]
@@ -55,12 +55,17 @@
 - [x] Real-time Status Sync Testing [x]
 - [x] Handover Workflow Verification [x]
 
-## Phase 6: AI Removal & Reliability (Current)
+## Phase 6: AI Removal & Reliability [x]
 - [x] Remove Gemini AI dependency for PDF analysis
 - [x] Remove AI payment screenshot verification
 - [x] Implement manual owner payment confirmation
 - [x] Add screenshot storage bucket and policies
 - [x] Update owner dashboard with verification buttons
 - [x] Fix logout functionality across all dashboards
-- [ ] Add push notifications for payment confirmations
+
+## Phase 7: Advanced Ops & Automation (Today) [x]
+- [x] **Owner Dashboard V2**: Real-time stats, search, and notifications [x]
+- [x] **Smart Pricing**: Custom page range selection for students [x]
+- [x] **Auto-Cleanup**: Automated DB and Storage pruning [x]
+- [x] **Cohesive Sync**: Real-time Shop Status / UPI / Name updates [x]
 - [ ] Mobile responsiveness audit

@@ -16,7 +16,9 @@ import {
     Square,
     Hourglass,
     Eye,
-    Download
+    Download,
+    Trash2,
+    X
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -31,9 +33,15 @@ export default function OwnerDashboard() {
     const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [isHandoverOpen, setIsHandoverOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [shopSettings, setShopSettings] = useState({ id: null, is_open: true, shop_name: "RIDHA PRINTERS" });
+    const [notifications, setNotifications] = useState(0);
+    const [notificationEvents, setNotificationEvents] = useState<any[]>([]);
+    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
     // Stats
     const stats = [
+        { label: "Shop Status", value: shopSettings.is_open ? "OPEN" : "CLOSED", icon: <TrendingUp className={shopSettings.is_open ? "text-emerald-500" : "text-red-500"} />, isStatus: true },
         { label: "Verifying", value: orders.filter(o => o.status === 'pending_verification').length, icon: <Hourglass className="text-purple-500" /> },
         { label: "Queued", value: orders.filter(o => o.status === 'queued').length, icon: <Clock className="text-orange-500" /> },
         { label: "Printing", value: orders.filter(o => o.status === 'printing').length, icon: <Printer className="text-blue-500" /> },
@@ -47,27 +55,101 @@ export default function OwnerDashboard() {
       *,
       profiles:customer_id (full_name)
     `)
+            .neq('status', 'pending_payment') // Hide unpaid orders
             .order("created_at", { ascending: false });
 
         setOrders(data || []);
         setLoading(false);
     };
 
+    const fetchShopSettings = async () => {
+        const { data } = await supabase.from("shop_settings").select("*").limit(1).single();
+        if (data) setShopSettings(data);
+    };
+
+    const toggleShopStatus = async () => {
+        const newStatus = !shopSettings.is_open;
+        setShopSettings(prev => ({ ...prev, is_open: newStatus }));
+
+        const { error } = await supabase
+            .from("shop_settings")
+            .update({ is_open: newStatus })
+            .eq("owner_id", profile?.id);
+
+        if (error) {
+            alert("Failed to update shop status: " + error.message);
+            fetchShopSettings();
+        }
+    };
+
     useEffect(() => {
         fetchOrders();
+        fetchShopSettings();
 
-        // Realtime subscription
+        // Realtime subscription - Instant updates with proper filtering
         const channel = supabase
-            .channel("orders_changes")
-            .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
-                fetchOrders();
+            .channel("dashboard_sync_v2")
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
+                const newOrder = payload.new as any;
+                // Only add to list if it's already paid (not pending_payment)
+                if (newOrder.status !== 'pending_payment') {
+                    setOrders(prev => [newOrder, ...prev]);
+                    setNotifications(prev => prev + 1);
+                    setNotificationEvents(prev => [{
+                        id: newOrder.id,
+                        type: 'new_order',
+                        message: `New order #${newOrder.pickup_code} ready for printing`,
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        status: newOrder.status
+                    }, ...prev].slice(0, 10));
+                }
+            })
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload) => {
+                const updatedOrder = payload.new as any;
+                const oldOrder = payload.old as any;
+
+                // If order just got paid (moved from pending_payment to queued), ADD it to the list
+                if (oldOrder.status === 'pending_payment' && updatedOrder.status === 'queued') {
+                    setOrders(prev => [updatedOrder, ...prev]);
+                    setNotifications(prev => prev + 1);
+                    setNotificationEvents(prev => [{
+                        id: updatedOrder.id,
+                        type: 'payment_received',
+                        message: `💰 Payment received for #${updatedOrder.pickup_code}`,
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        status: updatedOrder.status
+                    }, ...prev].slice(0, 10));
+                } else {
+                    // Update existing order in state
+                    setOrders(prev => prev.map(o =>
+                        o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o
+                    ));
+                }
+
+                // Notify on manual payment proof uploads (pending_verification)
+                if (updatedOrder.status === 'pending_verification' && oldOrder.status !== 'pending_verification') {
+                    setNotifications(prev => prev + 1);
+                    setNotificationEvents(prev => [{
+                        id: updatedOrder.id,
+                        type: 'payment_uploaded',
+                        message: `Order #${updatedOrder.pickup_code} needs verification`,
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        status: updatedOrder.status
+                    }, ...prev].slice(0, 10));
+                }
+            })
+            .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, (payload) => {
+                setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+            })
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "shop_settings" }, (payload) => {
+                setShopSettings(prev => ({ ...prev, ...payload.new }));
             })
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [supabase]);
+    }, [supabase, profile]);
 
     const toggleSelect = (id: string) => {
         setSelectedOrders(prev =>
@@ -100,6 +182,37 @@ export default function OwnerDashboard() {
         await fetchOrders();
     };
 
+    const handleDeleteOrder = async (id: string) => {
+        if (!confirm("Are you sure you want to remove this order from history?")) return;
+
+        const { error } = await supabase.from('orders').delete().eq('id', id);
+        if (error) {
+            alert("Error: " + error.message);
+        } else {
+            setOrders(prev => prev.filter(o => o.id !== id));
+        }
+    };
+
+    const handleBatchDelete = async () => {
+        const completedSelected = orders.filter(o => selectedOrders.includes(o.id) && o.status === 'completed');
+        if (completedSelected.length === 0) {
+            alert("Only completed (handed over) orders can be manually deleted.");
+            return;
+        }
+
+        if (!confirm(`Are you sure you want to remove ${completedSelected.length} completed orders?`)) return;
+
+        const idsToDelete = completedSelected.map(o => o.id);
+        const { error } = await supabase.from('orders').delete().in('id', idsToDelete);
+
+        if (error) {
+            alert("Error: " + error.message);
+        } else {
+            setOrders(prev => prev.filter(o => !idsToDelete.includes(o.id)));
+            setSelectedOrders(prev => prev.filter(id => !idsToDelete.includes(id)));
+        }
+    };
+
     const handleDirectPrint = async (order: any) => {
         if (!order.file_path) {
             alert("No file found for this order.");
@@ -114,30 +227,23 @@ export default function OwnerDashboard() {
 
             if (error || !data?.signedUrl) throw new Error("Could not get file access");
 
-            // 2. Clear existing iframe if any
-            const existing = document.getElementById('print-iframe');
-            if (existing) existing.remove();
+            // 2. Open in a new tab and trigger print
+            // We use window.open because browsers block cross-origin iframe.print()
+            const printWindow = window.open(data.signedUrl, '_blank');
 
-            // 3. Create hidden iframe
-            const iframe = document.createElement('iframe');
-            iframe.id = 'print-iframe';
-            iframe.style.position = 'fixed';
-            iframe.style.right = '0';
-            iframe.style.bottom = '0';
-            iframe.style.width = '0';
-            iframe.style.height = '0';
-            iframe.style.border = '0';
-            iframe.src = data.signedUrl;
+            if (printWindow) {
+                // Focus the new window
+                printWindow.focus();
 
-            // 4. Trigger print on load
-            iframe.onload = () => {
-                iframe.contentWindow?.focus();
-                iframe.contentWindow?.print();
-            };
+                // Note: Standard browsers handles PDFs with their own viewer which usually has a print button.
+                // For a more automated feel, many browsers support #toolbar=0&navpanes=0&scrollbar=0
+                // but window.print() on a direct PDF URL is restricted in some browsers for security.
+                // The most reliable way is letting the user use the PDF viewer's print action.
+            } else {
+                alert("Please allow popups to use the direct print feature.");
+            }
 
-            document.body.appendChild(iframe);
-
-            // 5. Update Status to 'printing' (if not already)
+            // 3. Update Status to 'printing' (if not already)
             if (order.status === 'queued') {
                 setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'printing' } : o));
                 await supabase.from('orders').update({ status: 'printing' }).eq('id', order.id);
@@ -147,6 +253,16 @@ export default function OwnerDashboard() {
             alert("Print failed: " + err.message);
         }
     };
+    const filteredOrders = orders.filter(order => {
+        if (!searchQuery) return true;
+
+        const term = searchQuery.toLowerCase();
+        const customerName = (order.profiles as any)?.full_name?.toLowerCase() || "guest";
+        const code = (order.pickup_code || "").toLowerCase();
+        const status = (order.status || "").toLowerCase();
+
+        return customerName.includes(term) || code.includes(term) || status.includes(term);
+    });
 
     return (
         <div className="min-h-screen bg-slate-50 flex">
@@ -157,6 +273,20 @@ export default function OwnerDashboard() {
                 <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8 sticky top-0 z-20">
                     <h2 className="text-lg font-bold">Shop Queue</h2>
                     <div className="flex items-center gap-4">
+                        {/* Shop Status Toggle */}
+                        <button
+                            onClick={toggleShopStatus}
+                            className={cn(
+                                "flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all shadow-sm border",
+                                shopSettings.is_open
+                                    ? "bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100"
+                                    : "bg-red-50 text-red-600 border-red-100 hover:bg-red-100"
+                            )}
+                        >
+                            <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", shopSettings.is_open ? "bg-emerald-500" : "bg-red-500")} />
+                            {shopSettings.is_open ? "Shop Open" : "Shop Closed"}
+                        </button>
+
                         <button
                             onClick={() => setIsHandoverOpen(true)}
                             className="bg-blue-600 text-white px-4 py-1.5 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-100"
@@ -168,13 +298,85 @@ export default function OwnerDashboard() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                             <input
                                 placeholder="Search orders..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
                                 className="pl-10 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-full text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
                             />
                         </div>
-                        <button className="relative p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-colors">
-                            <Bell size={20} />
-                            <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
-                        </button>
+                        <div className="relative">
+                            <button
+                                onClick={() => {
+                                    setIsNotificationOpen(!isNotificationOpen);
+                                    if (!isNotificationOpen) setNotifications(0);
+                                }}
+                                className="relative p-2 text-slate-500 hover:bg-slate-50 rounded-full transition-colors"
+                            >
+                                <Bell size={20} />
+                                {notifications > 0 && (
+                                    <span className="absolute top-1 right-1 flex h-4 w-4">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500 items-center justify-center text-[10px] text-white font-bold">{notifications}</span>
+                                    </span>
+                                )}
+                            </button>
+
+                            {/* Notification Panel */}
+                            <AnimatePresence>
+                                {isNotificationOpen && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                        className="absolute right-0 top-12 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50"
+                                    >
+                                        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                                            <h4 className="font-bold text-sm">Notifications</h4>
+                                            <button
+                                                onClick={() => setIsNotificationOpen(false)}
+                                                className="p-1 hover:bg-slate-100 rounded-full"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                        <div className="max-h-64 overflow-y-auto">
+                                            {notificationEvents.length === 0 ? (
+                                                <div className="p-6 text-center text-slate-400">
+                                                    <Bell size={24} className="mx-auto mb-2 opacity-50" />
+                                                    <p className="text-sm font-medium">No new notifications</p>
+                                                </div>
+                                            ) : (
+                                                notificationEvents.map((event, idx) => (
+                                                    <div key={idx} className="p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className={cn(
+                                                                "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                                                                event.type === 'new_order' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600"
+                                                            )}>
+                                                                {event.type === 'new_order' ? <Printer size={14} /> : <Eye size={14} />}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-sm font-medium text-slate-800 truncate">{event.message}</p>
+                                                                <p className="text-[10px] text-slate-400 font-bold mt-0.5">{event.time}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                        {notificationEvents.length > 0 && (
+                                            <div className="p-3 border-t border-slate-100">
+                                                <button
+                                                    onClick={() => { setNotificationEvents([]); setIsNotificationOpen(false); }}
+                                                    className="w-full text-xs font-bold text-blue-600 hover:underline"
+                                                >
+                                                    Mark all as read
+                                                </button>
+                                            </div>
+                                        )}
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
                     </div>
                 </header>
 
@@ -187,20 +389,29 @@ export default function OwnerDashboard() {
                 {/* Dashboard Content */}
                 <div className="p-8 space-y-8">
                     {/* Quick Stats */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {stats.map((stat, i) => (
+                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {stats.map((stat: any, i) => (
                             <motion.div
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: i * 0.1 }}
                                 key={stat.label}
-                                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"
+                                onClick={() => stat.isStatus && toggleShopStatus()}
+                                className={cn(
+                                    "bg-white p-6 rounded-2xl border border-slate-200 shadow-sm transition-all",
+                                    stat.isStatus && "cursor-pointer hover:border-blue-400 active:scale-95"
+                                )}
                             >
                                 <div className="flex items-center justify-between mb-4">
                                     <div className="p-2 bg-slate-50 rounded-lg">{stat.icon}</div>
                                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{stat.label}</span>
                                 </div>
-                                <div className="text-3xl font-bold">{stat.value}</div>
+                                <div className={cn(
+                                    "text-2xl font-black",
+                                    stat.isStatus && (shopSettings.is_open ? "text-emerald-600" : "text-red-600")
+                                )}>
+                                    {stat.value}
+                                </div>
                             </motion.div>
                         ))}
                     </div>
@@ -235,6 +446,12 @@ export default function OwnerDashboard() {
                                         className="text-sm font-bold hover:text-blue-400 transition-colors"
                                     >
                                         Handover
+                                    </button>
+                                    <button
+                                        onClick={handleBatchDelete}
+                                        className="text-sm font-bold text-red-400 hover:text-red-500 transition-colors"
+                                    >
+                                        Delete Selected
                                     </button>
                                     <button
                                         onClick={() => setSelectedOrders([])}
@@ -272,9 +489,9 @@ export default function OwnerDashboard() {
                                 <tbody className="divide-y divide-slate-100 font-medium">
                                     {loading ? (
                                         <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">Loading queue...</td></tr>
-                                    ) : orders.length === 0 ? (
-                                        <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">Queue is empty. Waiting for orders...</td></tr>
-                                    ) : orders.map((order) => (
+                                    ) : filteredOrders.length === 0 ? (
+                                        <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">No orders matching your search.</td></tr>
+                                    ) : filteredOrders.map((order) => (
                                         <tr
                                             key={order.id}
                                             className={cn(
@@ -297,13 +514,14 @@ export default function OwnerDashboard() {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="font-bold text-slate-900">{(order.profiles as any)?.full_name || "Guest"}</div>
-                                                <div className="text-xs text-slate-500">
-                                                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                <div className="text-[10px] font-bold text-slate-500 flex flex-col uppercase tracking-tighter leading-tight mt-0.5">
+                                                    <span>{new Date(order.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}</span>
+                                                    <span className="text-slate-400">{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="font-bold text-slate-900">{order.total_pages} Pages</div>
-                                                <div className="flex gap-1 mt-1">
+                                                <div className="flex flex-wrap gap-1 mt-1">
                                                     <span className={cn(
                                                         "text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter",
                                                         order.print_type === 'COLOR' ? "bg-orange-100 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-600 border border-slate-200"
@@ -313,12 +531,15 @@ export default function OwnerDashboard() {
                                                     <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter bg-blue-100 text-blue-600 border border-blue-200">
                                                         {order.side_type === 'DOUBLE' ? 'Double' : 'Single'}
                                                     </span>
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter bg-purple-100 text-purple-600 border border-purple-200">
+                                                        PGS: {order.page_range || 'All'}
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="text-sm font-bold text-slate-900 leading-none">₹{Number(order.estimated_cost).toFixed(2)}</div>
                                                 <div className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-tighter">
-                                                    {order.payment_status === 'paid' ? 'Paid' : 'Unpaid'}
+                                                    {(order.payment_status === 'paid' || order.payment_verified) ? '✓ Paid' : 'Unpaid'}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
@@ -335,7 +556,7 @@ export default function OwnerDashboard() {
                                                                         alert("No screenshot available.");
                                                                         return;
                                                                     }
-                                                                    const { data, error } = await supabase.storage.from('screenshots').createSignedUrl(order.payment_screenshot, 60);
+                                                                    const { data, error } = await supabase.storage.from('payments').createSignedUrl(order.payment_screenshot, 60);
                                                                     if (error) {
                                                                         alert("Error: " + error.message);
                                                                         return;
@@ -404,6 +625,18 @@ export default function OwnerDashboard() {
                                                             className="p-2.5 text-emerald-600 hover:bg-emerald-100 rounded-xl transition-all border border-emerald-200 bg-emerald-50 shadow-sm"
                                                         >
                                                             <CheckCircle2 size={18} />
+                                                        </button>
+                                                    )}
+                                                    {order.status === 'completed' && (
+                                                        <button
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteOrder(order.id);
+                                                            }}
+                                                            title="Delete Order"
+                                                            className="p-2.5 text-red-600 hover:bg-red-100 rounded-xl transition-all border border-red-200 bg-red-50 shadow-sm"
+                                                        >
+                                                            <Trash2 size={18} />
                                                         </button>
                                                     )}
                                                     <button

@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useEffect, useState } from "react";
 import {
     Printer,
     Users,
@@ -13,8 +14,28 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 export function OwnerSidebar() {
-    const { profile, signOut } = useAuth();
+    const { profile, signOut, supabase } = useAuth();
     const pathname = usePathname();
+    const [shopName, setShopName] = useState("Solve Print");
+
+    useEffect(() => {
+        const fetchName = async () => {
+            const { data } = await supabase.from("shop_settings").select("shop_name").limit(1).single();
+            if (data?.shop_name) setShopName(data.shop_name);
+        };
+        fetchName();
+
+        const channel = supabase
+            .channel("sidebar_name_sync")
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "shop_settings" }, (payload) => {
+                if (payload.new.shop_name) setShopName(payload.new.shop_name);
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [supabase]);
 
     const navItems = [
         { href: "/dashboard/owner", label: "Live Queue", icon: <Users size={20} /> },
@@ -28,7 +49,7 @@ export function OwnerSidebar() {
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                     <Printer size={20} />
                 </div>
-                <span className="font-bold text-xl tracking-tight">Solve Print</span>
+                <span className="font-bold text-xl tracking-tight truncate">{shopName}</span>
             </div>
 
             <nav className="space-y-1 flex-1">

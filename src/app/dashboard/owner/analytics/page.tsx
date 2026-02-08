@@ -20,15 +20,22 @@ export default function AnalyticsPage() {
     const { supabase, user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState<any>(null);
+    const [velocity, setVelocity] = useState<any[]>([]);
 
     useEffect(() => {
         if (!user) return;
 
         const fetchAnalytics = async () => {
-            const { data, error } = await supabase.rpc('get_owner_analytics');
-            if (data && data[0]) {
-                setStats(data[0]);
+            const { data: statsData } = await supabase.rpc('get_owner_analytics');
+            if (statsData && statsData[0]) {
+                setStats(statsData[0]);
             }
+
+            const { data: velocityData } = await supabase.rpc('get_print_velocity');
+            if (velocityData) {
+                setVelocity(velocityData);
+            }
+
             setLoading(false);
         };
 
@@ -118,14 +125,25 @@ export default function AnalyticsPage() {
                                 <h3 className="text-2xl font-bold">Print Velocity</h3>
                             </div>
                             <div className="relative z-10 flex items-end gap-2 h-32">
-                                {[40, 70, 45, 90, 65, 80, 50].map((h, i) => (
-                                    <div key={i} className="flex-1 bg-blue-500/20 rounded-t-lg relative group">
-                                        <div
-                                            style={{ height: `${h}%` }}
-                                            className="absolute bottom-0 w-full bg-blue-500 rounded-t-lg group-hover:bg-blue-400 transition-all cursor-pointer"
-                                        />
+                                {velocity.length > 0 ? velocity.map((v, i) => {
+                                    const maxOrders = Math.max(...velocity.map(item => Number(item.order_count)), 5);
+                                    const h = (Number(v.order_count) / maxOrders) * 100;
+                                    return (
+                                        <div key={i} className="flex-1 bg-blue-500/20 rounded-t-lg relative group">
+                                            <div
+                                                style={{ height: `${Math.max(h, 5)}%` }}
+                                                className="absolute bottom-0 w-full bg-blue-500 rounded-t-lg group-hover:bg-blue-400 transition-all cursor-pointer"
+                                            />
+                                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl">
+                                                {v.order_count} Orders @ {new Date(v.hour_timestamp).getHours()}:00
+                                            </div>
+                                        </div>
+                                    );
+                                }) : (
+                                    <div className="flex-1 flex items-center justify-center text-slate-500 text-xs font-bold">
+                                        No recent print activity
                                     </div>
-                                ))}
+                                )}
                             </div>
                             <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600 blur-[100px] opacity-20" />
                         </div>
