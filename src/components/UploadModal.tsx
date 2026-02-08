@@ -21,11 +21,10 @@ interface UploadModalProps {
     isOpen: boolean;
     onClose: () => void;
     userId: string;
-    profile?: any;
     resumeOrder?: any;
 }
 
-export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModalProps) {
     const [file, setFile] = useState<File | null>(null);
     const [status, setStatus] = useState<'idle' | 'analyzing' | 'uploading' | 'payment' | 'success' | 'error'>('idle');
     const [analysis, setAnalysis] = useState<any>(null);
@@ -303,7 +302,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                                     orderId={order.id}
                                     amount={order.estimated_cost}
                                     vpa={vpa}
-                                    customerProfile={profile}
                                     onSuccess={() => {
                                         setStatus('success');
                                         setTimeout(() => { onClose(); reset(); }, 2000);

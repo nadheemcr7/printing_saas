@@ -199,15 +199,16 @@ export default function OwnerDashboard() {
                                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Pickup Code</th>
                                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Customer</th>
                                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Pages</th>
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Cost</th>
                                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                                         <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 font-medium">
                                     {loading ? (
-                                        <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">Loading queue...</td></tr>
+                                        <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">Loading queue...</td></tr>
                                     ) : orders.length === 0 ? (
-                                        <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">Queue is empty. Waiting for orders...</td></tr>
+                                        <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">Queue is empty. Waiting for orders...</td></tr>
                                     ) : orders.map((order) => (
                                         <tr
                                             key={order.id}
@@ -239,29 +240,34 @@ export default function OwnerDashboard() {
                                                 {order.total_pages} Pages
                                             </td>
                                             <td className="px-6 py-4">
+                                                <div className="text-sm font-bold text-slate-900 leading-none">₹{Number(order.estimated_cost).toFixed(2)}</div>
+                                                <div className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-tighter">
+                                                    {order.payment_status === 'paid' ? 'Paid' : 'Unpaid'}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
                                                 <StatusBadge status={order.status} />
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center justify-end gap-2 opacity-100 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex items-center justify-end gap-2 opacity-100">
                                                     {order.status === 'pending_verification' && (
                                                         <>
                                                             <button
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
                                                                     if (!order.payment_screenshot) {
-                                                                        alert("No screenshot available for this order.");
+                                                                        alert("No screenshot available.");
                                                                         return;
                                                                     }
                                                                     const { data, error } = await supabase.storage.from('screenshots').createSignedUrl(order.payment_screenshot, 60);
                                                                     if (error) {
-                                                                        console.error("Screenshot Error:", error);
-                                                                        alert("Error opening screenshot: " + error.message);
+                                                                        alert("Error: " + error.message);
                                                                         return;
                                                                     }
                                                                     if (data?.signedUrl) window.open(data.signedUrl);
                                                                 }}
                                                                 title="View Proof"
-                                                                className="p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-all border border-purple-100 bg-purple-50/50"
+                                                                className="p-2.5 text-purple-600 hover:bg-purple-100 rounded-xl transition-all border border-purple-200 bg-purple-50 shadow-sm"
                                                             >
                                                                 <Eye size={18} />
                                                             </button>
@@ -276,12 +282,14 @@ export default function OwnerDashboard() {
                                                                         .eq('id', order.id);
 
                                                                     if (error) {
-                                                                        alert("Failed to confirm payment: " + error.message);
+                                                                        alert("Failed to confirm: " + error.message);
                                                                         fetchOrders(); // Rollback
+                                                                    } else {
+                                                                        await fetchOrders(); // Full sync
                                                                     }
                                                                 }}
                                                                 title="Confirm Payment"
-                                                                className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all border border-emerald-100 bg-emerald-50/50"
+                                                                className="p-2.5 text-emerald-600 hover:bg-emerald-100 rounded-xl transition-all border border-emerald-200 bg-emerald-50 shadow-sm"
                                                             >
                                                                 <CheckCircle2 size={18} />
                                                             </button>
@@ -296,14 +304,16 @@ export default function OwnerDashboard() {
 
                                                                 const { error } = await supabase.from('orders').update({ status: 'printing' }).eq('id', order.id);
                                                                 if (error) {
-                                                                    alert("Update failed: " + error.message);
+                                                                    alert("Error: " + error.message);
                                                                     fetchOrders(); // Rollback
+                                                                } else {
+                                                                    await fetchOrders();
                                                                 }
                                                             }}
                                                             title="Start Printing"
-                                                            className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-all border border-blue-100 bg-blue-50/50"
+                                                            className="p-2.5 text-blue-600 hover:bg-blue-100 rounded-xl transition-all border border-blue-200 bg-blue-50 shadow-sm"
                                                         >
-                                                            <motion.div animate={{ opacity: [1, 0.5, 1] }} transition={{ repeat: Infinity, duration: 2 }}>
+                                                            <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 2 }}>
                                                                 <Printer size={18} />
                                                             </motion.div>
                                                         </button>
@@ -317,12 +327,14 @@ export default function OwnerDashboard() {
 
                                                                 const { error } = await supabase.from('orders').update({ status: 'ready' }).eq('id', order.id);
                                                                 if (error) {
-                                                                    alert("Update failed: " + error.message);
+                                                                    alert("Error: " + error.message);
                                                                     fetchOrders(); // Rollback
+                                                                } else {
+                                                                    await fetchOrders();
                                                                 }
                                                             }}
                                                             title="Mark Ready"
-                                                            className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-all border border-emerald-100 bg-emerald-50/50"
+                                                            className="p-2.5 text-emerald-600 hover:bg-emerald-100 rounded-xl transition-all border border-emerald-200 bg-emerald-50 shadow-sm"
                                                         >
                                                             <CheckCircle2 size={18} />
                                                         </button>
@@ -331,19 +343,18 @@ export default function OwnerDashboard() {
                                                         onClick={async (e) => {
                                                             e.stopPropagation();
                                                             if (!order.file_path) {
-                                                                alert("No document file linked to this order.");
+                                                                alert("No document file linked.");
                                                                 return;
                                                             }
                                                             const { data, error } = await supabase.storage.from('documents').createSignedUrl(order.file_path, 60);
                                                             if (error) {
-                                                                console.error("Document Error:", error);
-                                                                alert("Error opening document: " + error.message);
+                                                                alert("Error: " + error.message);
                                                                 return;
                                                             }
                                                             if (data?.signedUrl) window.open(data.signedUrl);
                                                         }}
                                                         title="Download Document"
-                                                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-all border border-blue-100 bg-blue-50/50"
+                                                        className="p-2.5 text-slate-600 hover:bg-slate-100 rounded-xl transition-all border border-slate-200 bg-slate-50 shadow-sm"
                                                     >
                                                         <Download size={18} />
                                                     </button>
