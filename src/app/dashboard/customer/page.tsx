@@ -80,6 +80,7 @@ export default function CustomerDashboard() {
                     setSelectedOrder(null);
                 }}
                 userId={user?.id || ""}
+                profile={profile}
                 resumeOrder={selectedOrder}
             />
 
