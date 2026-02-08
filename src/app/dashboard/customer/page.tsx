@@ -13,7 +13,8 @@ import {
     ChevronRight,
     Plus,
     Handshake,
-    LogOut
+    LogOut,
+    Users
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { UploadModal } from "@/components/UploadModal";
@@ -27,6 +28,7 @@ export default function CustomerDashboard() {
     const [shopSettings, setShopSettings] = useState({ shop_name: "RIDHA PRINTERS", is_open: true });
     const [showAllOrders, setShowAllOrders] = useState(false);
     const [activeTab, setActiveTab] = useState<'prints' | 'docs'>('prints');
+    const [queueStatus, setQueueStatus] = useState({ ordersInQueue: 0, totalPages: 0 });
 
     useEffect(() => {
         if (!user) return;
@@ -56,9 +58,24 @@ export default function CustomerDashboard() {
             }
         };
 
+        const fetchQueueStatus = async () => {
+            // Get count of orders in queue (queued + printing)
+            const { data, error } = await supabase
+                .from("orders")
+                .select("total_pages")
+                .in("status", ["queued", "printing"]);
+
+            if (!error && data) {
+                const ordersInQueue = data.length;
+                const totalPages = data.reduce((sum, o) => sum + (o.total_pages || 0), 0);
+                setQueueStatus({ ordersInQueue, totalPages });
+            }
+        };
+
         // Initial fetch
         fetchMyOrders();
         fetchShopSettings();
+        fetchQueueStatus();
 
         // === LAYER 1: Supabase Realtime - User-scoped channel ===
         const orderChannel = supabase
@@ -89,11 +106,21 @@ export default function CustomerDashboard() {
             })
             .subscribe();
 
+        // Queue status real-time updates (listen to all order changes)
+        const queueChannel = supabase
+            .channel(`queue_status_${user.id}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
+                // Refetch queue status when any order changes
+                fetchQueueStatus();
+            })
+            .subscribe();
+
         // === LAYER 2: Visibility Change (refetch only when tab becomes active after being hidden) ===
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
                 fetchMyOrders();
                 fetchShopSettings();
+                fetchQueueStatus();
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -101,6 +128,7 @@ export default function CustomerDashboard() {
         return () => {
             supabase.removeChannel(orderChannel);
             supabase.removeChannel(settingsChannel);
+            supabase.removeChannel(queueChannel);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [supabase, user]);
@@ -184,6 +212,69 @@ export default function CustomerDashboard() {
                         <Plus size={28} />
                     </div>
                 </motion.button>
+
+                {/* Queue Status Card - Real-time */}
+                {shopSettings.is_open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn(
+                            "rounded-2xl p-5 border-2 transition-all",
+                            queueStatus.ordersInQueue === 0
+                                ? "bg-emerald-50 border-emerald-200"
+                                : queueStatus.ordersInQueue <= 3
+                                    ? "bg-amber-50 border-amber-200"
+                                    : "bg-red-50 border-red-200"
+                        )}
+                    >
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className={cn(
+                                    "w-10 h-10 rounded-xl flex items-center justify-center",
+                                    queueStatus.ordersInQueue === 0
+                                        ? "bg-emerald-100"
+                                        : queueStatus.ordersInQueue <= 3
+                                            ? "bg-amber-100"
+                                            : "bg-red-100"
+                                )}>
+                                    <Users size={20} className={cn(
+                                        queueStatus.ordersInQueue === 0
+                                            ? "text-emerald-600"
+                                            : queueStatus.ordersInQueue <= 3
+                                                ? "text-amber-600"
+                                                : "text-red-600"
+                                    )} />
+                                </div>
+                                <div>
+                                    <p className="font-bold text-slate-900">
+                                        {queueStatus.ordersInQueue === 0
+                                            ? "No queue! 🎉"
+                                            : `${queueStatus.ordersInQueue} order${queueStatus.ordersInQueue > 1 ? 's' : ''} ahead`}
+                                    </p>
+                                    <p className="text-sm text-slate-500">
+                                        {queueStatus.ordersInQueue === 0
+                                            ? "Your order will be printed immediately"
+                                            : `~${Math.max(2, Math.round(queueStatus.totalPages * 0.5))} min wait (${queueStatus.totalPages} pages)`}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className={cn(
+                                "text-xs font-black uppercase px-2.5 py-1 rounded-full",
+                                queueStatus.ordersInQueue === 0
+                                    ? "bg-emerald-200 text-emerald-700"
+                                    : queueStatus.ordersInQueue <= 3
+                                        ? "bg-amber-200 text-amber-700"
+                                        : "bg-red-200 text-red-700"
+                            )}>
+                                {queueStatus.ordersInQueue === 0
+                                    ? "Fast"
+                                    : queueStatus.ordersInQueue <= 3
+                                        ? "Moderate"
+                                        : "Busy"}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
 
                 {/* Summary Card */}
                 <div className="bg-slate-900 text-white rounded-[32px] p-8 relative overflow-hidden">

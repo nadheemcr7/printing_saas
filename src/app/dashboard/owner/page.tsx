@@ -176,10 +176,9 @@ export default function OwnerDashboard() {
 
         if (error) {
             alert("Error: " + error.message);
+            fetchOrders(); // Rollback on error
         }
-
-        // Final sync with DB
-        await fetchOrders();
+        // No fetchOrders() on success - optimistic update handles it
     };
 
     const handleDeleteOrder = async (id: string) => {
@@ -247,7 +246,7 @@ export default function OwnerDashboard() {
             if (order.status === 'queued') {
                 setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'printing' } : o));
                 await supabase.from('orders').update({ status: 'printing' }).eq('id', order.id);
-                fetchOrders();
+                // No fetchOrders() - optimistic update is sufficient
             }
         } catch (err: any) {
             alert("Print failed: " + err.message);
@@ -571,7 +570,7 @@ export default function OwnerDashboard() {
                                                             <button
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
-                                                                    // Optimistic Update
+                                                                    // Optimistic Update only - realtime will sync
                                                                     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, payment_status: 'paid', status: 'queued' } : o));
 
                                                                     const { error } = await supabase.from('orders')
@@ -580,9 +579,7 @@ export default function OwnerDashboard() {
 
                                                                     if (error) {
                                                                         alert("Failed to confirm: " + error.message);
-                                                                        fetchOrders(); // Rollback
-                                                                    } else {
-                                                                        await fetchOrders(); // Full sync
+                                                                        fetchOrders(); // Rollback on error only
                                                                     }
                                                                 }}
                                                                 title="Confirm Payment"
@@ -610,15 +607,13 @@ export default function OwnerDashboard() {
                                                         <button
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
-                                                                // Optimistic Update
+                                                                // Optimistic Update only
                                                                 setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'ready' } : o));
 
                                                                 const { error } = await supabase.from('orders').update({ status: 'ready' }).eq('id', order.id);
                                                                 if (error) {
                                                                     alert("Error: " + error.message);
-                                                                    fetchOrders(); // Rollback
-                                                                } else {
-                                                                    await fetchOrders();
+                                                                    fetchOrders(); // Rollback on error only
                                                                 }
                                                             }}
                                                             title="Mark Ready"
