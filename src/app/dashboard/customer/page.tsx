@@ -59,16 +59,14 @@ export default function CustomerDashboard() {
         };
 
         const fetchQueueStatus = async () => {
-            // Get count of orders in queue (queued + printing)
-            const { data, error } = await supabase
-                .from("orders")
-                .select("total_pages")
-                .in("status", ["queued", "printing"]);
+            // Use RPC function to get GLOBAL queue count (bypasses RLS)
+            const { data, error } = await supabase.rpc('get_queue_status');
 
-            if (!error && data) {
-                const ordersInQueue = data.length;
-                const totalPages = data.reduce((sum, o) => sum + (o.total_pages || 0), 0);
-                setQueueStatus({ ordersInQueue, totalPages });
+            if (!error && data && data[0]) {
+                setQueueStatus({
+                    ordersInQueue: data[0].orders_in_queue || 0,
+                    totalPages: data[0].total_pages || 0
+                });
             }
         };
 
@@ -79,25 +77,39 @@ export default function CustomerDashboard() {
 
         // === LAYER 1: Supabase Realtime - User-scoped channel ===
         const orderChannel = supabase
-            .channel(`customer_orders_${user.id}`)
-            .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
-                if (payload.new.customer_id === user.id) {
-                    setOrders(prev => [payload.new as any, ...prev]);
-                }
+            .channel(`customer_orders_v2_${user.id}`)
+            .on("postgres_changes", {
+                event: "INSERT",
+                schema: "public",
+                table: "orders",
+                filter: `customer_id=eq.${user.id}`
+            }, (payload) => {
+                console.log("[Realtime] INSERT:", payload.new);
+                setOrders(prev => [payload.new as any, ...prev]);
             })
-            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload) => {
-                if (payload.new.customer_id === user.id) {
-                    setOrders(prev => prev.map(o =>
-                        o.id === payload.new.id ? { ...o, ...payload.new } : o
-                    ));
-                }
+            .on("postgres_changes", {
+                event: "UPDATE",
+                schema: "public",
+                table: "orders",
+                filter: `customer_id=eq.${user.id}`
+            }, (payload) => {
+                console.log("[Realtime] UPDATE:", payload.new);
+                setOrders(prev => prev.map(o =>
+                    o.id === payload.new.id ? { ...o, ...payload.new } : o
+                ));
             })
-            .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, (payload) => {
-                if (payload.old.customer_id === user.id) {
-                    setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-                }
+            .on("postgres_changes", {
+                event: "DELETE",
+                schema: "public",
+                table: "orders",
+                filter: `customer_id=eq.${user.id}`
+            }, (payload) => {
+                console.log("[Realtime] DELETE:", payload.old);
+                setOrders(prev => prev.filter(o => o.id !== payload.old.id));
             })
-            .subscribe();
+            .subscribe((status) => {
+                console.log("[Realtime] Subscription status:", status);
+            });
 
         const settingsChannel = supabase
             .channel(`shop_settings_${user.id}`)
