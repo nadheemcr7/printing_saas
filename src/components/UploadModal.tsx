@@ -117,6 +117,8 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
             // Calculate cost
             const totalCost = calculatePrintCost(localPageCount, printType, sideType);
 
+            setStatus('uploading');
+
             // 2. Upload to Storage
             const filePath = `${userId}/${Date.now()}_${file.name}`;
             const { error: uploadError } = await supabase.storage
@@ -290,10 +292,12 @@ export function UploadModal({ isOpen, onClose, userId, resumeOrder }: UploadModa
                                     </div>
                                     <div className="space-y-2">
                                         <p className="text-xl font-bold font-display text-slate-900">
-                                            Processing document...
+                                            {status === 'analyzing' ? "Preparing document..." : "Saving to cloud..."}
                                         </p>
                                         <p className="text-slate-500 font-medium px-8">
-                                            Preparing your file and calculating the best price.
+                                            {status === 'analyzing'
+                                                ? "Almost ready! Finalizing your print options."
+                                                : "Uploading your file safely to the shop queue."}
                                         </p>
                                     </div>
                                 </div>

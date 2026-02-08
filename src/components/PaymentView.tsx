@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
-import { cn } from "@/lib/utils";
+import { cn, compressImage } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
 
 interface PaymentViewProps {
@@ -53,25 +53,28 @@ export function PaymentView({ orderId, amount, vpa, onSuccess }: PaymentViewProp
         try {
             setStatus('verifying');
 
-            // 1. Upload Screenshot to Storage
-            const filePath = `${orderId}_${Date.now()}.png`;
+            // 1. Compress Image (Reduces 5MB -> ~200KB)
+            const compressedBlob = await compressImage(file, 0.6);
+            const fileName = `${orderId}_${Date.now()}.jpg`;
 
+            // 2. Upload to Storage
             const { error: uploadError } = await supabase.storage
                 .from('screenshots')
-                .upload(filePath, file, {
+                .upload(fileName, compressedBlob, {
+                    contentType: 'image/jpeg',
                     cacheControl: '3600',
                     upsert: false
                 });
 
             if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-            // 2. Update Order Status (Manual Verification)
+            // 3. Update Order Status
             const { error: updateError } = await supabase
                 .from('orders')
                 .update({
                     payment_status: 'waiting',
                     status: 'pending_verification',
-                    payment_screenshot: filePath
+                    payment_screenshot: fileName
                 })
                 .eq('id', orderId);
 
