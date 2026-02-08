@@ -18,7 +18,7 @@
     "framer-motion": "^12.33.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",
-    "next": "15.1.7",
+    "next": "^16.1.6",
     "pdf-lib": "^1.17.1",
     "qr-code-styling": "^1.9.2",
     "qrcode.react": "^4.2.0",
@@ -34,7 +34,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.1.7",
+    "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
