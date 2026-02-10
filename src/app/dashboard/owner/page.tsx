@@ -56,8 +56,10 @@ export default function OwnerDashboard() {
         .filter(o => {
             const orderDate = new Date(o.created_at);
             const today = new Date();
-            return orderDate.toDateString() === today.toDateString() &&
-                (o.payment_status === 'paid' || o.payment_verified);
+            const isToday = orderDate.toDateString() === today.toDateString();
+            // Count as revenue if it's paid, verified, or actively in the workflow
+            const isRevenue = o.payment_status === 'paid' || o.payment_verified || ['queued', 'printing', 'ready', 'completed'].includes(o.status);
+            return isToday && isRevenue;
         })
         .reduce((sum, o) => sum + Number(o.estimated_cost || 0), 0);
 
