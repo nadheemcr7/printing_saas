@@ -1,7 +1,6 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
-import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
 
 export const useAuth = () => {
@@ -10,82 +9,59 @@ export const useAuth = () => {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     ), []);
 
-    const router = useRouter();
     const [user, setUser] = useState<any>(null);
     const [profile, setProfile] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const getUser = async () => {
+        const initAuth = async () => {
             try {
-                // Get session first
                 const { data: { session } } = await supabase.auth.getSession();
-
                 if (session) {
-                    // Double check with getUser() for security/staleness
-                    const { data: { user: verifiedUser }, error } = await supabase.auth.getUser();
-
-                    if (error || !verifiedUser) {
-                        setUser(null);
-                        setProfile(null);
-                    } else {
-                        setUser(verifiedUser);
-                        const { data: profileData } = await supabase
-                            .from("profiles")
-                            .select("*")
-                            .eq("id", verifiedUser.id)
-                            .single();
-                        setProfile(profileData);
-                    }
-                } else {
-                    setUser(null);
-                    setProfile(null);
+                    setUser(session.user);
+                    // Fetch profile without blocking loading state
+                    supabase.from("profiles").select("*").eq("id", session.user.id).single()
+                        .then(({ data }) => data && setProfile(data));
                 }
             } catch (err) {
-                console.error("Auth initialization error:", err);
-                setUser(null);
-                setProfile(null);
+                console.error("Auth error:", err);
             } finally {
                 setLoading(false);
             }
         };
 
-        getUser();
+        initAuth();
 
         const { data: authListener } = supabase.auth.onAuthStateChange(
-            async (_event, session) => {
+            async (event, session) => {
                 if (session) {
                     setUser(session.user);
-                    const { data: profileData } = await supabase
-                        .from("profiles")
-                        .select("*")
-                        .eq("id", session.user.id)
-                        .single();
-                    setProfile(profileData);
+                    supabase.from("profiles").select("*").eq("id", session.user.id).single()
+                        .then(({ data }) => data && setProfile(data));
                 } else {
                     setUser(null);
                     setProfile(null);
                 }
-                setLoading(false);
+
+                if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+                    setLoading(false);
+                }
             }
         );
 
         return () => {
             authListener.subscription.unsubscribe();
         };
-    }, [supabase, router]);
+    }, [supabase]);
 
     const signOut = async () => {
         try {
             await supabase.auth.signOut();
-            // Clear any cached state
             setUser(null);
             setProfile(null);
-            // Force hard navigation to clear all state
             window.location.replace("/login");
         } catch (error) {
             console.error("Sign out error:", error);
-            // Fallback: force redirect anyway
             window.location.replace("/login");
         }
     };

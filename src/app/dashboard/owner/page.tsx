@@ -50,15 +50,6 @@ export default function OwnerDashboard() {
     const [notificationEvents, setNotificationEvents] = useState<any[]>([]);
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
-    if (authLoading) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-        );
-    }
-
-    if (!user) return null;
 
     // Stats
     const stats = [
@@ -206,6 +197,17 @@ export default function OwnerDashboard() {
             supabase.removeChannel(channel);
         };
     }, [supabase, profile?.id]);
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
+
+    if (!user) return null;
+
 
     const toggleSelect = (id: string) => {
         setSelectedOrders(prev =>

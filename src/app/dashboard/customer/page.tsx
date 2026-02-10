@@ -38,15 +38,7 @@ export default function CustomerDashboard() {
         }
     }, [user, loading]);
 
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-        );
-    }
 
-    if (!user) return null;
 
     const [queueStatus, setQueueStatus] = useState({ ordersInQueue: 0, totalPages: 0 });
 
@@ -153,6 +145,17 @@ export default function CustomerDashboard() {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [supabase, user?.id]);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
+
+    if (!user) return null;
+
 
     // Compute which orders to display based on active tab and showAll state
     const ordersToDisplay = activeTab === 'docs'
