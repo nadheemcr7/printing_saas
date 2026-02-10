@@ -255,7 +255,16 @@ export default function OwnerDashboard() {
     const handleDeleteOrder = async (id: string) => {
         if (!confirm("Are you sure you want to remove this order from history?")) return;
 
+        const orderToDelete = orders.find(o => o.id === id);
+
+        // 1. Delete from storage first (if file exists)
+        if (orderToDelete?.file_path) {
+            await supabase.storage.from('documents').remove([orderToDelete.file_path]);
+        }
+
+        // 2. Delete the record
         const { error } = await supabase.from('orders').delete().eq('id', id);
+
         if (error) {
             alert("Error: " + error.message);
         } else {
@@ -273,6 +282,14 @@ export default function OwnerDashboard() {
         if (!confirm(`Are you sure you want to remove ${completedSelected.length} completed orders?`)) return;
 
         const idsToDelete = completedSelected.map(o => o.id);
+        const filePathsToDelete = completedSelected.map(o => o.file_path).filter(Boolean);
+
+        // 1. Delete from storage (batch)
+        if (filePathsToDelete.length > 0) {
+            await supabase.storage.from('documents').remove(filePathsToDelete);
+        }
+
+        // 2. Delete records
         const { error } = await supabase.from('orders').delete().in('id', idsToDelete);
 
         if (error) {
