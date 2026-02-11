@@ -30,8 +30,8 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
     const [status, setStatus] = useState<'idle' | 'analyzing' | 'uploading' | 'payment' | 'success' | 'error'>('idle');
     const [analysis, setAnalysis] = useState<any>(null);
     const [order, setOrder] = useState<any>(null);
-    const [vpa, setVpa] = useState<string>("shop@upi"); // Default fallback
-    const [rate, setRate] = useState<number>(2.00); // Default fallback ₹2
+    const [vpa, setVpa] = useState<string>("shop@upi");
+    const [pricingRules, setPricingRules] = useState<any>(null);
     const [printType, setPrintType] = useState<'BW' | 'COLOR'>('BW');
     const [sideType, setSideType] = useState<'SINGLE' | 'DOUBLE'>('SINGLE');
     const [error, setError] = useState<string | null>(null);
@@ -71,12 +71,29 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                 if (profileData && profileData[0]?.vpa) setVpa(profileData[0].vpa);
             }
 
-            const { data: pricingData } = await supabase
+            // Fetch pricing from pricing_config
+            const { data: pConfig } = await supabase
                 .from("pricing_config")
-                .select("rate_per_page")
-                .limit(1);
+                .select("*")
+                .order('priority', { ascending: true });
 
-            if (pricingData && pricingData[0]?.rate_per_page) setRate(Number(pricingData[0].rate_per_page));
+            if (pConfig && pConfig.length > 0) {
+                const rules: any = { bw: { single: {}, double: {} }, color: { single: {}, double: {} } };
+                pConfig.forEach((row: any) => {
+                    const type = row.print_type.toLowerCase();
+                    const side = row.side_type.toLowerCase();
+                    if (!rules[type]) rules[type] = {};
+                    if (!rules[type][side]) rules[type][side] = {};
+
+                    if (row.priority === 1) {
+                        rules[type][side].basePrice = Number(row.rate);
+                        rules[type][side].baseLimit = row.tier_limit || 0;
+                    } else if (row.priority === 2) {
+                        rules[type][side].extraPrice = Number(row.rate);
+                    }
+                });
+                setPricingRules(rules);
+            }
         };
 
         fetchSettings();
@@ -88,6 +105,9 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                 const s = payload.new as any;
                 const activeVpa = s.active_vpa_type === 'primary' ? s.primary_vpa : s.backup_vpa;
                 if (activeVpa) setVpa(activeVpa);
+            })
+            .on("postgres_changes", { event: "*", schema: "public", table: "pricing_config" }, () => {
+                fetchSettings(); // Refresh all pricing on any change
             })
             .subscribe();
 
@@ -126,9 +146,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                 setLocalPages(data.pages || 1);
             } catch (err) {
                 console.error("Server analysis failed, falling back to client logic or default", err);
-                // Fallback could be implemented, but for now we default or show error. 
-                // Actually, let's keep the client logic as a fallback if fetch fails?
-                // No, let's trust the server as per V3 plan.
                 setLocalPages(1);
             }
 
@@ -139,7 +156,7 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
     }, []);
 
     const activePageCount = parsePageRange(pageRange, localPages);
-    const estimatedCost = calculatePrintCost(activePageCount, printType, sideType);
+    const estimatedCost = calculatePrintCost(activePageCount, printType, sideType, pricingRules);
 
     // Cleanup preview URL
     useEffect(() => {
@@ -174,10 +191,8 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
             setStatus('analyzing');
             console.log("Step 1: Analyzing document...", file.name, file.size);
 
-            // 1. USE PRE-CALCULATED PAGE COUNT (Optimized for Mobile)
             let finalLocalPageCount = localPages || 1;
 
-            // If for some reason localPages wasn't set, try one last time
             if (!localPages) {
                 try {
                     finalLocalPageCount = await getDocumentPageCount(file);
@@ -188,17 +203,13 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
             }
             console.log("Step 1 Success: Pages =", finalLocalPageCount);
 
-            // Parse range count
             const finalPageCount = parsePageRange(pageRange, finalLocalPageCount);
-
-            // Calculate cost
-            const totalCost = calculatePrintCost(finalPageCount, printType, sideType);
+            const totalCost = calculatePrintCost(finalPageCount, printType, sideType, pricingRules);
             console.log("Step 2: Calculated Cost =", totalCost);
 
             setStatus('uploading');
             console.log("Step 3: Uploading to Storage...", file.size, "bytes");
 
-            // 2. Upload to Storage - Use actual mime type
             const blob = new Blob([file], { type: file.type || 'application/octet-stream' });
             const cleanFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
             const filePath = `${userId}/${Date.now()}_${cleanFileName}`;
@@ -219,7 +230,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
             }
             console.log("Step 3 Success: File Path =", filePath);
 
-            // 3. Create Order
             console.log("Step 4: Creating database record...");
             const pickupCode = generatePickupCode();
             const { data: newOrder, error: orderError } = await supabase
@@ -341,7 +351,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                                                 </button>
                                             </div>
 
-                                            {/* PDF Preview Area */}
                                             {previewUrl && (
                                                 <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden h-40 relative group">
                                                     {file.name.toLowerCase().endsWith('.pdf') ? (
@@ -363,7 +372,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                                                 </div>
                                             )}
 
-                                            {/* Selection UI */}
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="space-y-2">
                                                     <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Print Color</label>
@@ -393,7 +401,6 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                                                 </div>
                                             </div>
 
-                                            {/* Page Range Input */}
                                             <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl space-y-3">
                                                 <div className="flex items-center justify-between">
                                                     <label className="text-[10px] font-black uppercase text-blue-600 tracking-widest">Select Pages to Print</label>

@@ -12,7 +12,8 @@ import {
     Loader2,
     AlertCircle,
     ChevronLeft,
-    Power
+    Power,
+    DollarSign
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ export default function OwnerSettingsPage() {
     }, [supabase, user]);
 
     const handleSave = async () => {
+        if (!user) return;
         setSaving(true);
         setError(null);
         setSuccess(false);
@@ -168,6 +170,29 @@ export default function OwnerSettingsPage() {
                         />
                     </div>
                 </div>
+            </div>
+
+            <div className="space-y-4">
+                <div className="flex items-center gap-2 px-2">
+                    <DollarSign size={18} className="text-blue-600" />
+                    <h3 className="font-bold text-slate-400 text-xs uppercase tracking-widest">Rate Card</h3>
+                </div>
+                <Link href="/dashboard/owner/pricing">
+                    <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm hover:shadow-md transition-all group cursor-pointer flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                <DollarSign size={24} />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-slate-900">Pricing Configuration</h4>
+                                <p className="text-xs text-slate-500 font-bold mt-0.5">Set Custom Rates for B/W & Color</p>
+                            </div>
+                        </div>
+                        <div className="w-10 h-10 rounded-full border border-slate-100 flex items-center justify-center text-slate-400 group-hover:border-blue-200 group-hover:text-blue-600 transition-all">
+                            <ChevronLeft size={20} className="rotate-180" />
+                        </div>
+                    </div>
+                </Link>
             </div>
 
             <div className="space-y-4">

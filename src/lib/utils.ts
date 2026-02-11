@@ -31,20 +31,56 @@ export function formatCurrency(amount: number): string {
 /**
  * Calculates print cost based on Ridha Printers rules.
  */
-export function calculatePrintCost(pages: number, printType: 'BW' | 'COLOR', sideType: 'SINGLE' | 'DOUBLE'): number {
-  if (printType === 'COLOR') {
-    return sideType === 'SINGLE' ? pages * 10 : pages * 20;
+// Pricing Interfaces
+export interface PricingTier {
+  basePrice: number;
+  baseLimit: number;
+  extraPrice: number;
+}
+
+export interface PricingConfig {
+  bw: {
+    single: PricingTier;
+    double: PricingTier;
+  };
+  color: {
+    single: PricingTier;
+    double: PricingTier;
+  };
+}
+
+export const DEFAULT_PRICING: PricingConfig = {
+  bw: {
+    single: { basePrice: 2, baseLimit: 10, extraPrice: 1 },
+    double: { basePrice: 2, baseLimit: 10, extraPrice: 1.5 }
+  },
+  color: {
+    single: { basePrice: 10, baseLimit: 0, extraPrice: 10 },
+    double: { basePrice: 20, baseLimit: 0, extraPrice: 20 }
+  }
+};
+
+export function calculatePrintCost(
+  pages: number,
+  printType: 'BW' | 'COLOR',
+  sideType: 'SINGLE' | 'DOUBLE',
+  pricing: PricingConfig = DEFAULT_PRICING
+): number {
+  const typeKey = printType === 'BW' ? 'bw' : 'color';
+  const sideKey = sideType === 'SINGLE' ? 'single' : 'double';
+
+  // Fallback safely if pricing config is incomplete
+  const tier = pricing?.[typeKey]?.[sideKey] || DEFAULT_PRICING[typeKey][sideKey];
+
+  if (pages <= tier.baseLimit) {
+    return pages * tier.basePrice;
   }
 
-  // B/W Logic
-  if (sideType === 'SINGLE') {
-    if (pages <= 10) return pages * 2;
-    return (10 * 2) + (pages - 10) * 1;
-  } else {
-    // DOUBLE SIDE
-    if (pages <= 10) return pages * 2;
-    return (10 * 2) + (pages - 10) * 1.5;
-  }
+  const baseCost = tier.baseLimit * tier.basePrice;
+  const extraPages = pages - tier.baseLimit;
+  const extraCost = extraPages * tier.extraPrice;
+
+  return baseCost + extraCost;
 }
 
 /**

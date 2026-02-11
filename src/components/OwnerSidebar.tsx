@@ -7,6 +7,7 @@ import {
     Users,
     TrendingUp,
     Settings,
+    DollarSign,
     LogOut
 } from "lucide-react";
 import Link from "next/link";
@@ -48,6 +49,7 @@ export function OwnerSidebar() {
     const navItems = [
         { href: "/dashboard/owner", label: "Live Queue", icon: <Users size={20} /> },
         { href: "/dashboard/owner/analytics", label: "Analytics", icon: <TrendingUp size={20} /> },
+        { href: "/dashboard/owner/pricing", label: "Pricing Config", icon: <DollarSign size={20} /> },
         { href: "/dashboard/owner/settings", label: "Shop Settings", icon: <Settings size={20} /> },
     ];
 

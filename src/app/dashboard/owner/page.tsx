@@ -64,7 +64,7 @@ export default function OwnerDashboard() {
     });
 
     // 3. Fetch Analytics (Today's Revenue)
-    const { data: analytics = { todayRevenue: 0 } } = useQuery({
+    const { data: analytics = { archivedRevenue: 0 } } = useQuery({
         queryKey: ['owner_analytics'],
         queryFn: async () => {
             // Calculate strictly from today's orders in DB + archived if needed
