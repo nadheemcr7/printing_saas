@@ -131,33 +131,17 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
             setStatus('idle');
             setError(null);
 
-            // Early server-side scan for instant feedback
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-
-            console.log("Starting server-side analysis for:", selectedFile.name);
-
+            // Instant local detection for better UX
             try {
-                const res = await fetch('/api/analyze-pdf', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!res.ok) {
-                    console.warn("Analysis API returned non-OK status:", res.status);
-                    return; // Keep the default of 1
-                }
-
-                const data = await res.json();
-                console.log("Analysis Result from Server:", data);
-
-                if (data && typeof data.pages === 'number' && data.pages > 0) {
-                    setLocalPages(data.pages);
+                const pages = await getDocumentPageCount(selectedFile);
+                console.log("Local Analysis Result:", pages);
+                if (pages > 0) {
+                    setLocalPages(pages);
                     setPageRange("All");
                 }
             } catch (err) {
-                console.error("Server analysis fetch failed:", err);
-                // We already set it to 1, so no need to do anything here
+                console.error("Local analysis failed", err);
+                setLocalPages(1);
             }
 
             // Create preview URL

@@ -1,8 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-// Removed client-side pdf-lib and jszip to reduce bundle size
-// import { PDFDocument } from "pdf-lib";
-// import JSZip from "jszip";
+import { PDFDocument } from "pdf-lib";
+import JSZip from "jszip";
 
 /**
  * Merges tailwind classes safely.
@@ -29,7 +28,7 @@ export function formatCurrency(amount: number): string {
 }
 
 /**
- * Calculates print cost based on Ridha Printers rules.
+ * Calculates print cost based on Tiered Pricing rules.
  */
 // Pricing Interfaces
 export interface PricingTier {
@@ -115,30 +114,60 @@ export function parsePageRange(range: string, totalPages: number): number {
 }
 
 /**
- * Detects page count via Serverless Function
+ * Detects page count LOCALLY in the browser for instant feedback.
  */
 export async function getDocumentPageCount(file: File): Promise<number> {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+
   try {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const res = await fetch('/api/analyze-pdf', {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!res.ok) {
-      console.warn("Server analysis failed");
-      return 1;
+    if (extension === 'pdf') {
+      return await getPdfPageCount(file);
+    } else if (extension === 'docx') {
+      return await getDocxPageCount(file);
     }
-
-    const data = await res.json();
-    return data.pages || 1;
+    return 1;
   } catch (error) {
-    console.error("Error analyzing document:", error);
+    console.error("Error detecting page count:", error);
     return 1;
   }
 }
+
+/**
+ * Reads a PDF file locally and returns the page count.
+ */
+async function getPdfPageCount(file: File): Promise<number> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    return pdfDoc.getPageCount();
+  } catch (error) {
+    console.error("Error counting PDF pages:", error);
+    return 1;
+  }
+}
+
+/**
+ * Reads a DOCX file locally and returns the page count.
+ */
+async function getDocxPageCount(file: File): Promise<number> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const appXml = await zip.file("docProps/app.xml")?.async("text");
+
+    if (appXml) {
+      const match = appXml.match(/<Pages>(\d+)<\/Pages>/);
+      if (match && match[1]) {
+        return parseInt(match[1]);
+      }
+    }
+    return 1;
+  } catch (error) {
+    console.error("Error counting Word pages:", error);
+    return 1;
+  }
+}
+
 /**
  * Compresses an image file for faster uploads.
  */
@@ -151,7 +180,6 @@ export async function compressImage(file: File, quality: number = 0.6): Promise<
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        // Maintain aspect ratio but limit size
         const MAX_WIDTH = 1200;
         const MAX_HEIGHT = 1200;
         let width = img.width;
