@@ -65,7 +65,7 @@ export default function LandingPage() {
               className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-1.5 rounded-full text-sm font-bold mb-6"
             >
               <Sparkles size={16} />
-              <span>AI-Powered Printing for Colleges</span>
+              <span>Smart Digital Printing for Colleges</span>
             </motion.div>
 
             <motion.h1
@@ -75,7 +75,7 @@ export default function LandingPage() {
               className="text-6xl md:text-7xl font-bold tracking-tight mb-6 leading-[1.1]"
             >
               Skip the queue. <br />
-              <span className="text-blue-600">Print with AI.</span>
+              <span className="text-blue-600">Print with ease.</span>
             </motion.h1>
 
             <motion.p
@@ -146,8 +146,8 @@ export default function LandingPage() {
             />
             <FeatureCard
               icon={<Sparkles className="text-purple-500" />}
-              title="AI Price Guarantees"
-              description="Gemini-powered file inspection counts pages automatically for accurate bill calculation."
+              title="Fair Price Guarantee"
+              description="System counts pages automatically for accurate bill calculation."
               delay={0.3}
             />
           </div>
@@ -166,7 +166,7 @@ export default function LandingPage() {
             <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-100 -translate-y-1/2 hidden md:block" />
             <div className="grid grid-cols-1 md:grid-cols-4 gap-12 relative z-10">
               <Step number="01" title="Upload" description="Drag and drop your PDF or Doc files." />
-              <Step number="02" title="Price Preview" description="AI scans pages and calculates ₹ cost." />
+              <Step number="02" title="Price Preview" description="System scans pages and calculates ₹ cost." />
               <Step number="03" title="Scan & Pay" description="Instant UPI payment from any app." />
               <Step number="04" title="Collect" description="Pick up with your 3-digit pickup code." />
             </div>

@@ -13,7 +13,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Ridha Smart Print | AI-Powered College Printing",
+  title: "Ridha Smart Print | Smart College Printing",
   description: "Skip the queue at Ridha Printers. Upload documents, pay via UPI, and collect with a smart code.",
 };
 
