@@ -143,9 +143,13 @@ export function UploadModal({ isOpen, onClose, userId, profile, resumeOrder }: U
                 if (!res.ok) throw new Error('Analysis failed');
 
                 const data = await res.json();
-                setLocalPages(data.pages || 1);
+                console.log("Analysis Result:", data);
+                if (data.pages) {
+                    setLocalPages(data.pages);
+                    setPageRange("All"); // Reset to 'All' to show correct total initially
+                }
             } catch (err) {
-                console.error("Server analysis failed, falling back to client logic or default", err);
+                console.error("Server analysis failed", err);
                 setLocalPages(1);
             }
 
